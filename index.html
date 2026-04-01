@@ -370,7 +370,7 @@ const msalConfig = {
   auth: {
     clientId: '75e2bbab-8a00-4138-b784-b932ebe0c558',
     authority: 'https://login.microsoftonline.com/4aeeed86-5b8d-4dc3-9f21-189804e8ef43',
-    redirectUri: window.location.origin + '/UnitID_Scanner_MSAL.html'
+    redirectUri: window.location.href.split('?')[0].split('#')[0]
   },
   cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
 };
