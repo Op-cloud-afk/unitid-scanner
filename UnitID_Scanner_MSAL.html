@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unit ID Scanner v4.0 — Auto Mode (MSAL)</title>
+<script src="https://alcdn.msauth.net/browser/2.28.1/js/msal-browser.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+:root {
+  --bg:#f0f2f5; --surface:#fff; --panel:#f8f9fb; --border:#dde1e8;
+  --accent:#d4720a; --accent2:#2563eb; --success:#16a34a; --danger:#dc2626; --warn:#d97706;
+  --text:#1a1d23; --muted:#6b7280;
+  --mono:'IBM Plex Mono',monospace; --sans:'IBM Plex Sans',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;min-height:100vh;display:flex;flex-direction:column}
+
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:56px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.logo{font-family:var(--mono);font-weight:700;font-size:15px;letter-spacing:.08em;display:flex;align-items:center;gap:10px}
+.logo-dot{width:8px;height:8px;background:var(--accent);border-radius:50%;animation:pulse 2s infinite}
+.logo-tag{font-size:10px;background:rgba(212,114,10,.12);color:var(--accent);border:1px solid rgba(212,114,10,.3);border-radius:3px;padding:2px 6px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.hdr-actions{display:flex;gap:8px;align-items:center}
+
+.btn{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.05em;padding:7px 16px;border-radius:4px;border:none;cursor:pointer;transition:all .15s;text-transform:uppercase}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--muted)}
+.btn-ghost:hover{border-color:var(--text);color:var(--text)}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#b85e08}
+.btn-success{background:var(--success);color:#fff}
+.btn-success:hover{background:#15803d}
+.btn-danger{background:transparent;border:1px solid var(--danger);color:var(--danger)}
+.btn-danger:hover{background:var(--danger);color:#fff}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+.sbadge{display:inline-flex;align-items:center;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;padding:3px 8px;border-radius:3px;font-weight:600}
+.sb-ok{background:rgba(22,163,74,.12);color:var(--success)}
+.sb-warn{background:rgba(212,114,10,.12);color:var(--accent)}
+.sb-err{background:rgba(220,38,38,.12);color:var(--danger)}
+.sb-auto{background:rgba(22,163,74,.12);color:var(--success);animation:pulse 2s infinite}
+
+.stats-bar{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 24px;display:flex;gap:24px;align-items:center;flex-wrap:wrap}
+.stat{display:flex;flex-direction:column}
+.stat-lbl{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.stat-val{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--accent)}
+.stat-val.blue{color:var(--accent2)}.stat-val.green{color:var(--success)}
+.cost-box{margin-left:auto;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px 14px;display:flex;gap:16px;align-items:center}
+.cost-lbl{font-family:var(--mono);font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.cost-val{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--text)}
+.cost-sub{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.cost-bar-wrap{width:90px}
+.cost-bar-bg{height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px}
+.cost-bar-fill{height:100%;border-radius:3px;transition:width .4s,background .4s}
+.c-ok{background:var(--success)}.c-warn{background:var(--warn)}.c-danger{background:var(--danger)}
+
+main{flex:1;display:grid;grid-template-columns:1fr 380px 340px;height:calc(100vh - 98px);overflow:hidden}
+@media(max-width:1100px){main{grid-template-columns:1fr 340px}}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+
+.approve-panel{background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.approve-hdr{padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface);font-family:var(--mono);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.approve-body{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:16px}
+.approve-empty{color:var(--muted);text-align:center;font-size:13px}
+.approve-img{max-width:100%;max-height:200px;border-radius:6px;border:1px solid var(--border);object-fit:contain;background:var(--panel)}
+.approve-number{font-family:var(--mono);font-size:28px;font-weight:700;letter-spacing:.08em;color:var(--text);text-align:center;padding:8px 16px;background:var(--panel);border:2px solid var(--accent);border-radius:8px;min-width:260px}
+.approve-edit{font-family:var(--mono);font-size:20px;font-weight:700;letter-spacing:.06em;text-align:center;padding:8px 16px;border:2px solid var(--accent2);border-radius:8px;background:var(--surface);color:var(--text);outline:none;width:260px;text-transform:uppercase}
+.approve-edit:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(212,114,10,.15)}
+.approve-conf{font-family:var(--mono);font-size:13px;color:var(--muted)}
+.approve-conf b{color:var(--text)}
+.approve-iso{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:3px;font-weight:600}
+.approve-iso.ok{background:rgba(22,163,74,.12);color:var(--success)}
+.approve-iso.fail{background:rgba(220,38,38,.12);color:var(--danger)}
+.approve-timer{width:100%;height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:4px}
+.approve-timer-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .1s linear}
+.approve-meta{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center}
+.approve-btns{display:flex;gap:10px;width:100%}
+.approve-btns .btn{flex:1;padding:12px;font-size:13px}
+
+.feed-item{cursor:pointer}
+.feed-item:hover{box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.side-panel.collapsed{max-height:42px;overflow:hidden}
+.side-panel.collapsed .side-view{display:none}
+.collapse-btn{background:transparent;border:none;color:var(--muted);font-family:var(--mono);font-size:18px;cursor:pointer;padding:0 8px;line-height:1}
+.collapse-btn:hover{color:var(--text)}
+
+.stat-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px}
+.stat-table th{text-align:left;padding:6px 8px;border-bottom:2px solid var(--border);color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-size:10px}
+.stat-table td{padding:5px 8px;border-bottom:1px solid var(--border)}
+.stat-table tr:hover td{background:rgba(212,114,10,.04)}
+.stat-bar{height:8px;border-radius:4px;background:var(--border);overflow:hidden;min-width:50px}
+.stat-bar-fill{height:100%;border-radius:4px}
+
+.feed-panel{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border)}
+.feed-hdr{padding:14px 18px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:space-between}
+.feed-title{font-family:var(--mono);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;display:flex;align-items:center;gap:8px}
+.feed-scroll{flex:1;overflow-y:auto;padding:12px 18px}
+
+.feed-item{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px;margin-bottom:10px;transition:border-color .3s}
+.feed-item.processing{border-color:var(--accent);box-shadow:0 0 0 1px rgba(212,114,10,.2)}
+.feed-item.success{border-color:var(--success)}
+.feed-item.error{border-color:var(--danger)}
+.feed-item.flagged{border-color:var(--warn)}
+.fi-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.fi-id{font-family:var(--mono);font-size:12px;font-weight:600}
+.fi-time{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.fi-body{display:flex;gap:12px;align-items:center}
+.fi-thumb{width:80px;height:60px;object-fit:cover;border-radius:4px;border:1px solid var(--border);background:var(--panel)}
+.fi-result{flex:1}
+.fi-num{font-family:var(--mono);font-size:16px;font-weight:700;letter-spacing:.06em}
+.fi-meta{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:3px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fi-status{display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:10px;font-weight:600}
+.fi-status.ok{color:var(--success)}.fi-status.warn{color:var(--warn)}.fi-status.err{color:var(--danger)}
+.fi-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:rot .7s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+
+.empty-feed{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:14px;color:var(--muted);text-align:center}
+.empty-icon{font-size:48px;opacity:.3}
+
+.side-panel{background:var(--panel);display:flex;flex-direction:column;overflow:hidden}
+.side-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface)}
+.stab{flex:1;background:transparent;border:none;border-bottom:2px solid transparent;color:var(--muted);font-family:var(--mono);font-size:11px;font-weight:600;padding:11px 8px;cursor:pointer;transition:all .15s}
+.stab:hover{color:var(--text)}.stab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.side-view{display:flex;flex-direction:column;flex:1;overflow-y:auto;padding:14px 18px}
+.side-view.hidden{display:none}
+
+.fsec{background:rgba(212,114,10,.04);border:1px solid rgba(212,114,10,.15);border-radius:5px;padding:12px;margin-bottom:14px}
+.fsec-t{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent);margin-bottom:10px;font-weight:700}
+.fg{margin-bottom:12px}.fg:last-child{margin-bottom:0}
+.fl{display:block;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:5px}
+.fi{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:13px;padding:9px 11px;outline:none;transition:border-color .15s}
+.fi:focus{border-color:var(--accent2)}
+select.fi{cursor:pointer}
+.fh{font-size:11px;color:var(--muted);margin-top:4px}
+
+.log-entry{display:flex;gap:8px;align-items:baseline;padding:3px 0;font-family:var(--mono);font-size:11px;line-height:1.5;border-bottom:1px solid rgba(0,0,0,.03)}
+.log-time{color:var(--muted);flex-shrink:0;min-width:55px}
+.log-icon{flex-shrink:0}
+.log-msg{word-break:break-word}
+.log-ok{color:var(--success)}.log-warn{color:var(--warn)}.log-err{color:var(--danger)}.log-info{color:var(--accent2)}
+
+.flag-item{background:var(--surface);border:1px solid var(--warn);border-radius:5px;padding:10px 12px;margin-bottom:8px}
+.flag-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.flag-num{font-family:var(--mono);font-size:14px;font-weight:700}
+.flag-reason{font-size:11px;color:var(--warn);font-family:var(--mono)}
+.flag-actions{display:flex;gap:6px;margin-top:8px}
+.flag-input{flex:1;background:var(--panel);border:1px solid var(--border);border-radius:3px;font-family:var(--mono);font-size:12px;padding:6px 8px;outline:none;text-transform:uppercase;letter-spacing:.06em}
+.flag-input:focus{border-color:var(--accent2)}
+
+.toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:11px 16px;font-family:var(--mono);font-size:12px;z-index:300;transform:translateY(80px);opacity:0;transition:all .3s;max-width:340px;box-shadow:0 4px 16px rgba(0,0,0,.12)}
+.toast.show{transform:translateY(0);opacity:1}
+.toast.success{border-color:var(--success);color:var(--success)}
+.toast.error{border-color:var(--danger);color:var(--danger)}
+.toast.info{border-color:var(--accent2);color:var(--accent2)}
+
+.auto-pulse{width:10px;height:10px;border-radius:50%;background:var(--success);display:inline-block;animation:pulse 1.5s infinite}
+.auto-pulse.off{background:var(--muted);animation:none}
+.auto-pulse.working{background:var(--accent);animation:pulse .5s infinite}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding-top:20px;overflow-y:auto}
+.modal-overlay.hidden{display:none}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.15)}
+.modal h2{font-family:var(--mono);font-size:14px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:18px;color:var(--accent)}
+.modal-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
+
+.origin-warn{background:rgba(220,38,38,.06);border:1px solid rgba(220,38,38,.2);border-radius:6px;padding:12px 16px;margin:8px 24px;font-family:var(--mono);font-size:11px;color:var(--danger);display:none;align-items:center;gap:8px}
+
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-overlay hidden" id="settingsModal">
+  <div class="modal">
+    <h2>Indstillinger</h2>
+    <div class="fsec">
+      <div class="fsec-t">Anthropic API</div>
+      <div class="fg">
+        <label class="fl">API-nøgle</label>
+        <input class="fi" id="cfgApiKey" type="password" placeholder="sk-ant-...">
+        <div class="fh">Gemmes kun lokalt i browseren</div>
+      </div>
+    </div>
+    <div class="fsec">
+      <div class="fsec-t">SharePoint / Microsoft List</div>
+      <div class="fg">
+        <label class="fl">Site URL</label>
+        <input class="fi" id="cfgSiteUrl" value="https://njcontaineroffshoreservi304.sharepoint.com/sites/common">
+      </div>
+      <div class="fg">
+        <label class="fl">Listenavn</label>
+        <input class="fi" id="cfgListName" value="Truckliste">
+      </div>
+      <div class="fg">
+        <label class="fl">Billedfelt (internt navn)</label>
+        <input class="fi" id="cfgImageField" value="Unitid0">
+        <div class="fh">Mellemrum = _x0020_ — fx "Unit id" = "Unit_x0020_id"</div>
+      </div>
+      <div class="fg">
+        <label class="fl">Nummerfelt (internt navn)</label>
+        <input class="fi" id="cfgNumberField" value="Unitid">
+      </div>
+    </div>
+    <div class="fsec">
+      <div class="fsec-t">Auto-scanning</div>
+      <div class="fg">
+        <label class="fl">Poll-interval (sekunder)</label>
+        <input class="fi" id="cfgPollInterval" type="number" min="5" max="300" value="15">
+        <div class="fh">Hvor ofte der tjekkes for nye rækker (5–300 sek)</div>
+      </div>
+      <div class="fg">
+        <label class="fl">Auto-godkend tærskel</label>
+        <select class="fi" id="cfgThreshold">
+          <option value="0">Gem altid (ingen tærskel)</option>
+          <option value="70">70% konfidens</option>
+          <option value="80" selected>80% konfidens</option>
+          <option value="90">90% konfidens</option>
+        </select>
+        <div class="fh">Resultater under tærsklen flagges til manuel gennemgang</div>
+      </div>
+      <div class="fg">
+        <label class="fl">Dobbelt-tjek</label>
+        <select class="fi" id="cfgDouble">
+          <option value="always">Altid</option>
+          <option value="low" selected>Kun ved konfidens under 85%</option>
+          <option value="never">Aldrig</option>
+        </select>
+      </div>
+      <div class="fg">
+        <label class="fl">Format</label>
+        <select class="fi" id="cfgFormat">
+          <option value="iso6346" selected>ISO 6346 Containernummer</option>
+          <option value="free">Fri tekst</option>
+        </select>
+      </div>
+    </div>
+    <div class="fsec">
+      <div class="fsec-t">Budget</div>
+      <div class="fg">
+        <label class="fl">Budget-loft (DKK)</label>
+        <input class="fi" id="cfgBudget" type="number" min="1" value="50">
+        <div class="fh">Stopper API-kald når grænsen nås · ~0,04 kr/billede</div>
+      </div>
+    </div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost" onclick="document.getElementById('settingsModal').classList.add('hidden')">Annuller</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Gem og forbind</button>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    UNIT ID SCANNER
+    <span class="logo-tag">v4.0 · AUTO · MSAL OAuth</span>
+  </div>
+  <div class="hdr-actions">
+    <span class="sbadge sb-warn" id="statusBadge">Ikke logget ind</span>
+    <button class="btn btn-success" id="btnLogin" onclick="msalLogin()">Microsoft Login</button>
+    <button class="btn btn-primary" id="btnToggleAuto" onclick="toggleAuto()" disabled>
+      <span class="auto-pulse off" id="autoPulse"></span>&nbsp;START AUTO
+    </button>
+    <button class="btn btn-ghost" id="btnSettings" onclick="openSettings()">Indstillinger</button>
+  </div>
+</header>
+
+<!-- ORIGIN WARNING (disabled - using MSAL OAuth) -->
+<div class="origin-warn" id="originWarn" style="display:none"></div>
+
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="stat"><span class="stat-lbl">I kø</span><span class="stat-val" id="stQueue">–</span></div>
+  <div class="stat"><span class="stat-lbl">Behandlet</span><span class="stat-val green" id="stDone">0</span></div>
+  <div class="stat"><span class="stat-lbl">ISO valid</span><span class="stat-val blue" id="stValid">0</span></div>
+  <div class="stat"><span class="stat-lbl">Flagget</span><span class="stat-val" id="stFlagged" style="color:var(--warn)">0</span></div>
+  <div class="stat"><span class="stat-lbl">Gns. konfidens</span><span class="stat-val" id="stConf">–</span></div>
+  <div class="cost-box">
+    <div>
+      <div class="cost-lbl">Forbrug</div>
+      <div class="cost-val" id="costAmt">0,00 kr</div>
+      <div class="cost-sub" id="costCalls">0 kald</div>
+    </div>
+    <div class="cost-bar-wrap">
+      <div style="display:flex;justify-content:space-between"><span class="cost-lbl">Budget</span><span class="cost-lbl" id="costBudget">50 kr</span></div>
+      <div class="cost-bar-bg"><div class="cost-bar-fill c-ok" id="costBar" style="width:0%"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<main>
+  <!-- LEFT: LIVE FEED -->
+  <div class="feed-panel">
+    <div class="feed-hdr">
+      <div class="feed-title">
+        <span class="auto-pulse off" id="feedPulse"></span>
+        Live feed
+      </div>
+      <button class="btn btn-ghost" onclick="clearFeed()" style="font-size:10px;padding:4px 10px">Ryd</button>
+    </div>
+    <div class="feed-scroll" id="feedScroll">
+      <div class="empty-feed" id="emptyFeed">
+        <div class="empty-icon">📦</div>
+        <div>Konfigurér indstillinger og tryk START AUTO</div>
+        <div style="font-size:12px;color:var(--muted)">Nye rækker i listen scannes automatisk</div>
+        <button class="btn btn-primary" onclick="openSettings()">Åbn indstillinger</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MIDDLE: APPROVAL PANEL -->
+  <div class="approve-panel">
+    <div class="approve-hdr">Godkendelse</div>
+    <div class="approve-body" id="approveBody">
+      <div class="approve-empty" id="approveEmpty">
+        <div style="font-size:36px;opacity:.3;margin-bottom:8px">🔍</div>
+        Venter på næste scanning…<br>
+        <span style="font-size:11px">Resultater vises her til godkendelse</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: LOG + FLAGGED + SETTINGS -->
+  <div class="side-panel" id="sidePanel">
+    <div class="side-tabs">
+      <button class="collapse-btn" id="collapseBtn" onclick="toggleSidePanel()" title="Skjul/vis panel">◀</button>
+      <button class="stab active" id="tabLog" onclick="switchSideTab('log')">Log</button>
+      <button class="stab" id="tabFlagged" onclick="switchSideTab('flagged')">Flagget <span id="flagCount"></span></button>
+      <button class="stab" id="tabStats" onclick="switchSideTab('stats')">Statistik</button>
+    </div>
+
+    <div class="side-view" id="viewLog">
+      <div id="logEntries"></div>
+    </div>
+
+    <div class="side-view hidden" id="viewFlagged">
+      <div id="flaggedList"><div style="color:var(--muted);font-size:12px;text-align:center;padding:24px 0">Ingen flaggede poster</div></div>
+    </div>
+
+    <div class="side-view hidden" id="viewStats">
+      <div style="margin-bottom:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="loadFullStats()" style="font-size:10px;padding:5px 12px">Hent fuld statistik fra SP</button>
+        <button class="btn btn-ghost" onclick="exportCSV()" style="font-size:10px;padding:5px 12px">Eksportér CSV</button>
+      </div>
+      <div class="fsec" style="margin-bottom:10px">
+        <div class="fsec-t">Denne session</div>
+        <div id="sessionStats" style="font-family:var(--mono);font-size:11px;line-height:1.8"></div>
+      </div>
+      <div class="fsec">
+        <div class="fsec-t">Medarbejder-statistik (Hvem)</div>
+        <div id="employeeStats" style="font-family:var(--mono);font-size:11px;line-height:1.6">
+          <div style="color:var(--muted);text-align:center;padding:12px 0">Tryk "Hent fuld statistik" eller scan poster</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// MSAL CONFIGURATION
+// ═══════════════════════════════════════════════════════════
+const msalConfig = {
+  auth: {
+    clientId: '75e2bbab-8a00-4138-b784-b932ebe0c558',
+    authority: 'https://login.microsoftonline.com/4aeeed86-5b8d-4dc3-9f21-189804e8ef43',
+    redirectUri: window.location.origin + '/UnitID_Scanner_MSAL.html'
+  },
+  cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
+};
+let msalInstance = null;
+let msalAccount = null;
+let spAccessToken = null;
+
+try {
+  msalInstance = new msal.PublicClientApplication(msalConfig);
+} catch(e) { console.error('MSAL init error:', e); }
+
+async function msalLogin() {
+  if (!msalInstance) { toast('MSAL ikke indlæst','error'); return; }
+  try {
+    const siteUrl = LS.get('siteUrl') || 'https://njcontaineroffshoreservi304.sharepoint.com/sites/common';
+    const spHost = new URL(siteUrl).origin;
+    log('Omdirigerer til Microsoft login…', 'info');
+    await msalInstance.loginRedirect({ scopes: [spHost + '/.default'] });
+  } catch(e) {
+    log('Login fejl: ' + e.message, 'err');
+    toast('Login fejlede', 'error');
+  }
+}
+
+function onLoginSuccess(account) {
+  msalAccount = account;
+  log(`Logget ind som ${msalAccount.username}`, 'ok');
+  setStatus('Logget ind', 'sb-ok');
+  document.getElementById('btnLogin').textContent = msalAccount.username;
+  document.getElementById('btnLogin').classList.remove('btn-success');
+  document.getElementById('btnLogin').classList.add('btn-ghost');
+  toast('Logget ind!', 'success');
+  connected = true;
+  document.getElementById('btnToggleAuto').disabled = false;
+  if (LS.get('apiKey') && LS.get('siteUrl')) testConnection();
+}
+
+async function getSPToken() {
+  if (!msalInstance || !msalAccount) throw new Error('Ikke logget ind — klik Microsoft Login');
+  const siteUrl = LS.get('siteUrl') || 'https://njcontaineroffshoreservi304.sharepoint.com/sites/common';
+  const spHost = new URL(siteUrl).origin;
+  try {
+    const resp = await msalInstance.acquireTokenSilent({ scopes: [spHost + '/.default'], account: msalAccount });
+    spAccessToken = resp.accessToken;
+    return spAccessToken;
+  } catch(e) {
+    const resp = await msalInstance.acquireTokenPopup({ scopes: [spHost + '/.default'], account: msalAccount });
+    spAccessToken = resp.accessToken;
+    return spAccessToken;
+  }
+}
+
+async function spFetch(url, options = {}) {
+  const token = await getSPToken();
+  const headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
+  delete options.credentials;
+  return fetch(url, { ...options, headers });
+}
+
+// ═══════════════════════════════════════════════════════════
+// STORAGE
+// ═══════════════════════════════════════════════════════════
+const LS = {
+  get: k => localStorage.getItem('uid4_'+k),
+  set: (k,v) => localStorage.setItem('uid4_'+k, v),
+  getJ: k => { try { return JSON.parse(localStorage.getItem('uid4_'+k)||'null') } catch { return null } },
+  setJ: (k,v) => localStorage.setItem('uid4_'+k, JSON.stringify(v))
+};
+
+// ═══════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════
+let autoRunning = false, pollTimer = null, processing = false;
+let processedIds = new Set(LS.getJ('processedIds') || []);
+let corrections  = LS.getJ('corrections') || [];
+let usage        = LS.getJ('usage') || { in:0, out:0, calls:0 };
+let digestCache  = null, entityCache = null;
+let flaggedItems = [];
+let statsDone = 0, statsValid = 0, statsFlagged = 0, confHistory = [];
+const MAX_FEED_ITEMS = 30;
+const MAX_LOG_ENTRIES = 80;
+let connected = false;
+
+// ═══════════════════════════════════════════════════════════
+// UTILITIES
+// ═══════════════════════════════════════════════════════════
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+
+function toast(msg, type='info', dur=3500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = 'toast show ' + type;
+  clearTimeout(t._t); t._t = setTimeout(() => t.className='toast', dur);
+}
+
+function log(msg, type='info') {
+  const now = new Date(), time = now.toTimeString().slice(0,8);
+  const icons = { info:'ℹ', ok:'✓', warn:'⚠', err:'✗', start:'▶', api:'🤖', sp:'📋', img:'🖼' };
+  const clsMap = { ok:'log-ok', warn:'log-warn', err:'log-err', info:'log-info', start:'log-info', api:'log-info', sp:'log-info', img:'log-info' };
+  const el = document.getElementById('logEntries');
+  if (!el) return;
+  const d = document.createElement('div'); d.className = 'log-entry';
+  d.innerHTML = `<span class="log-time">${time}</span><span class="log-icon">${icons[type]||'ℹ'}</span><span class="log-msg ${clsMap[type]||''}">${esc(msg)}</span>`;
+  el.appendChild(d);
+  // Trim old log entries
+  while (el.children.length > MAX_LOG_ENTRIES) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+  console.log(`[${time}] ${icons[type]||'ℹ'} ${msg}`);
+}
+
+function setStatus(txt, cls) {
+  const b = document.getElementById('statusBadge');
+  b.textContent = txt; b.className = 'sbadge ' + cls;
+}
+
+// ═══════════════════════════════════════════════════════════
+// COST TRACKING
+// ═══════════════════════════════════════════════════════════
+const PRICE = { in: 3/1e6, out: 15/1e6 }, DKK = 7;
+
+function trackUsage(inp, out) {
+  usage.in += inp||0; usage.out += out||0; usage.calls++;
+  LS.setJ('usage', usage); updateCost();
+}
+
+function calcCost() { return (usage.in * PRICE.in + usage.out * PRICE.out) * DKK; }
+
+function updateCost() {
+  const dkk = calcCost(), budget = parseFloat(LS.get('budgetDKK')||'50');
+  const pct = Math.min(100, dkk/budget*100);
+  document.getElementById('costAmt').textContent = dkk.toFixed(2)+' kr';
+  document.getElementById('costCalls').textContent = usage.calls+' kald';
+  document.getElementById('costBar').style.width = pct+'%';
+  document.getElementById('costBar').className = 'cost-bar-fill '+(pct>=90?'c-danger':pct>=70?'c-warn':'c-ok');
+  document.getElementById('costBudget').textContent = budget.toFixed(0)+' kr';
+}
+
+function checkBudget() {
+  const dkk = calcCost(), budget = parseFloat(LS.get('budgetDKK')||'50');
+  if (dkk >= budget) throw new Error('Budget-loft nået ('+budget+' kr)');
+}
+
+// ═══════════════════════════════════════════════════════════
+// ISO 6346
+// ═══════════════════════════════════════════════════════════
+function isoCheck(owner, serial) {
+  const chars = (owner+serial).toUpperCase();
+  const map = {A:10,B:12,C:13,D:14,E:15,F:16,G:17,H:18,I:19,J:20,K:21,L:23,M:24,N:25,O:26,P:27,Q:28,R:29,S:30,T:31,U:32,V:34,W:35,X:36,Y:37,Z:38};
+  let sum = 0;
+  for (let i=0; i<chars.length; i++) {
+    const c=chars[i], v=isNaN(c)?(map[c]||0):parseInt(c);
+    sum += v * Math.pow(2,i);
+  }
+  return (sum%11)===10 ? 0 : sum%11;
+}
+
+function validateISO(num) {
+  if (!num) return { valid:false, checkOk:false };
+  const clean = num.replace(/\s/g,'').toUpperCase();
+  const m = clean.match(/^([A-Z]{3})(U|J|Z)(\d{6})[-–]?(\d)$/);
+  if (!m) return { valid:false, checkOk:false };
+  const expected = isoCheck(m[1]+m[2], m[3]);
+  return { valid:true, checkOk:parseInt(m[4])===expected, expected, formatted:`${m[1]}${m[2]} ${m[3]}-${m[4]}` };
+}
+
+function formatISO(num) {
+  if (!num) return num;
+  const clean = num.replace(/[\s\-–]/g,'').toUpperCase();
+  const m = clean.match(/^([A-Z]{3,4})(\d{6,7})$/);
+  if (!m) return num;
+  const letters = m[1].padEnd(4,'U').slice(0,4);
+  const digits = m[2].slice(0,6);
+  const chk = m[2].length>6 ? m[2].slice(-1) : isoCheck(letters, digits);
+  return `${letters} ${digits}-${chk}`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// STATS
+// ═══════════════════════════════════════════════════════════
+function updateStats() {
+  document.getElementById('stDone').textContent = statsDone;
+  document.getElementById('stValid').textContent = statsValid;
+  document.getElementById('stFlagged').textContent = statsFlagged;
+  document.getElementById('stConf').textContent = confHistory.length ? Math.round(confHistory.reduce((a,b)=>a+b,0)/confHistory.length)+'%' : '–';
+}
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS
+// ═══════════════════════════════════════════════════════════
+function openSettings() {
+  document.getElementById('cfgApiKey').value     = LS.get('apiKey')    || '';
+  document.getElementById('cfgSiteUrl').value    = LS.get('siteUrl')   || 'https://njcontaineroffshoreservi304.sharepoint.com/sites/common';
+  document.getElementById('cfgListName').value   = LS.get('listName')  || 'Truckliste';
+  document.getElementById('cfgImageField').value = LS.get('imgField')  || 'Unitid0';
+  document.getElementById('cfgNumberField').value= LS.get('numField')  || 'Unitid';
+  document.getElementById('cfgPollInterval').value = LS.get('pollInterval') || '15';
+  document.getElementById('cfgThreshold').value  = LS.get('threshold') || '80';
+  document.getElementById('cfgDouble').value     = LS.get('double')    || 'low';
+  document.getElementById('cfgFormat').value     = LS.get('format')    || 'iso6346';
+  document.getElementById('cfgBudget').value     = LS.get('budgetDKK') || '50';
+  document.getElementById('settingsModal').classList.remove('hidden');
+}
+
+function saveSettings() {
+  const apiKey   = document.getElementById('cfgApiKey').value.trim();
+  const siteUrl  = document.getElementById('cfgSiteUrl').value.trim().replace(/\/$/,'');
+  const listName = document.getElementById('cfgListName').value.trim();
+
+  if (!apiKey)   { toast('API-nøgle mangler','error'); return; }
+  if (!siteUrl)  { toast('Site URL mangler','error'); return; }
+  if (!listName) { toast('Listenavn mangler','error'); return; }
+
+  LS.set('apiKey',    apiKey);
+  LS.set('siteUrl',   siteUrl);
+  LS.set('listName',  listName);
+  LS.set('imgField',  document.getElementById('cfgImageField').value.trim() || 'Unitid0');
+  LS.set('numField',  document.getElementById('cfgNumberField').value.trim() || 'Unitid');
+  LS.set('pollInterval', document.getElementById('cfgPollInterval').value || '15');
+  LS.set('threshold', document.getElementById('cfgThreshold').value || '80');
+  LS.set('double',    document.getElementById('cfgDouble').value || 'low');
+  LS.set('format',    document.getElementById('cfgFormat').value || 'iso6346');
+  LS.set('budgetDKK', document.getElementById('cfgBudget').value || '50');
+
+  entityCache = null; digestCache = null;
+  document.getElementById('settingsModal').classList.add('hidden');
+  updateCost();
+  log('Indstillinger gemt', 'ok');
+
+  // Check origin
+  checkOrigin();
+
+  // Test connection
+  testConnection();
+}
+
+function checkOrigin() {
+  // Not needed with MSAL — OAuth works cross-origin
+  return true;
+}
+
+async function testConnection() {
+  const siteUrl = LS.get('siteUrl'), listName = LS.get('listName');
+  setStatus('Tester…', 'sb-warn');
+  log(`Tester forbindelse til "${listName}"…`, 'start');
+
+  try {
+    const url = `${siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(listName)}')?$select=ItemCount,Title`;
+    const resp = await spFetch(url, { headers:{Accept:'application/json;odata=verbose'} });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const count = data.d.ItemCount;
+    log(`Forbundet! Liste "${data.d.Title}" — ${count} poster`, 'ok');
+    setStatus('Forbundet', 'sb-ok');
+    connected = true;
+    document.getElementById('btnToggleAuto').disabled = false;
+    toast('Forbundet til listen!', 'success');
+  } catch (e) {
+    log(`Forbindelsesfejl: ${e.message}`, 'err');
+    setStatus('Fejl', 'sb-err');
+    connected = false;
+    document.getElementById('btnToggleAuto').disabled = true;
+    toast('Kunne ikke forbinde — tjek log', 'error', 6000);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// SHAREPOINT REST API
+// ═══════════════════════════════════════════════════════════
+async function getDigest() {
+  const siteUrl = LS.get('siteUrl');
+  const now = Date.now();
+  if (digestCache && digestCache.exp > now) return digestCache.val;
+  const r = await spFetch(`${siteUrl}/_api/contextinfo`, { method:'POST', headers:{Accept:'application/json;odata=verbose'} });
+  if (!r.ok) throw new Error('Digest fejl: ' + r.status);
+  const d = await r.json();
+  const val = d.d.GetContextWebInformation.FormDigestValue;
+  digestCache = { val, exp: now + 25*60*1000 };
+  return val;
+}
+
+async function getEntityType() {
+  if (entityCache) return entityCache;
+  const siteUrl = LS.get('siteUrl'), listName = LS.get('listName');
+  try {
+    const r = await spFetch(`${siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(listName)}')?$select=ListItemEntityTypeFullName`, { headers:{Accept:'application/json;odata=verbose'} });
+    const d = await r.json();
+    entityCache = d.d.ListItemEntityTypeFullName;
+  } catch {
+    entityCache = `SP.Data.${listName.replace(/[^a-zA-Z0-9]/g,'_x0020_')}ListItem`;
+  }
+  return entityCache;
+}
+
+async function fetchPendingItems() {
+  const siteUrl = LS.get('siteUrl'), listName = LS.get('listName');
+  const imgField = LS.get('imgField') || 'Unitid0';
+  const numField = LS.get('numField') || 'Unitid';
+
+  const filter = encodeURIComponent(`${numField} eq null or ${numField} eq ''`);
+  const select = encodeURIComponent(`Id,Title,${imgField},${numField},Hvem`);
+  const url = `${siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(listName)}')/items?$select=${select}&$filter=${filter}&$top=50&$orderby=Id desc`;
+
+  const resp = await spFetch(url, { headers:{Accept:'application/json;odata=verbose'} });
+  if (!resp.ok) {
+    let det=''; try { const e=await resp.json(); det=e.error?.message?.value||''; } catch {}
+    throw new Error(`HTTP ${resp.status}: ${det||'tjek login'}`);
+  }
+  const data = await resp.json();
+  const all = data.d.results || [];
+
+  // Filter: has image, not already processed in this session
+  return all.filter(i => {
+    const v = i[imgField];
+    return v && v !== '' && !processedIds.has(String(i.Id));
+  });
+}
+
+async function saveToSP(itemId, value) {
+  const siteUrl = LS.get('siteUrl'), listName = LS.get('listName');
+  const numField = LS.get('numField') || 'Unitid';
+  const [digest, entityType] = await Promise.all([getDigest(), getEntityType()]);
+  const body = { __metadata:{type:entityType} };
+  body[numField] = value;
+  const resp = await spFetch(`${siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(listName)}')/items(${itemId})`,
+    { method:'POST',
+      headers:{Accept:'application/json;odata=verbose','Content-Type':'application/json;odata=verbose','X-RequestDigest':digest,'IF-MATCH':'*','X-HTTP-Method':'MERGE'},
+      body:JSON.stringify(body) });
+  if (!resp.ok && resp.status !== 204) {
+    const e = await resp.text();
+    throw new Error(`SP ${resp.status}: ${e.slice(0,200)}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// IMAGE
+// ═══════════════════════════════════════════════════════════
+function extractImgUrl(val, itemId) {
+  const siteUrl = LS.get('siteUrl') || '';
+  const listName = LS.get('listName') || 'Truckliste';
+  if (!val) return null;
+  if (typeof val==='object') { const u=(val.serverUrl||'')+(val.serverRelativeUrl||''); if (u.length>5) return u; }
+  if (typeof val==='string' && val.startsWith('{')) {
+    try {
+      const p=JSON.parse(val);
+      // SharePoint Image/Thumbnail column — image stored as attachment
+      if (p.fileName) {
+        return `${siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(listName)}')/items(${itemId})/AttachmentFiles('${encodeURIComponent(p.fileName)}')/$value`;
+      }
+      if (p.serverRelativeUrl) return (p.serverUrl||siteUrl)+p.serverRelativeUrl;
+      if (p.Url) return p.Url;
+    } catch {}
+  }
+  if (typeof val==='string') { if (val.startsWith('http')) return val; if (val.startsWith('/')) return siteUrl+val; }
+  return null;
+}
+
+async function toBase64(url) {
+  const r = await spFetch(url);
+  if (!r.ok) throw new Error('Billede HTTP '+r.status);
+  const blob = await r.blob();
+  const validTypes = ['image/jpeg','image/png','image/gif','image/webp'];
+  const mime = validTypes.includes(blob.type) ? blob.type : 'image/jpeg';
+  return new Promise((res,rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res({ data:fr.result.split(',')[1], mime });
+    fr.onerror = rej;
+    fr.readAsDataURL(blob);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// LOCALIZE + CROP
+// ═══════════════════════════════════════════════════════════
+async function localize(data, mime) {
+  checkBudget();
+  const prompt = `Se på dette containerbillede. Find ISO 6346 containernummeret (format: 4 bogstaver + 6 cifre + checkciffer, fx "MSCU 123456-7").
+REGLER:
+- Vælg den tekst der bedst matcher ISO 6346
+- IGNORER: advarselsskilte, vægt, størrelseskoder, operatørnavne
+Returner KUN JSON: {"found":true,"x":0.15,"y":0.08,"w":0.45,"h":0.18,"rotation":0,"confidence":85}
+x,y,w,h = relativ 0.0-1.0. Tilføj ~10% margin. Hvis ikke fundet: {"found":false}`;
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages', { method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':LS.get('apiKey'),'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:300,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data}},{type:'text',text:prompt}]}]})});
+  if (!resp.ok) return null;
+  const d = await resp.json();
+  if (d.usage) trackUsage(d.usage.input_tokens, d.usage.output_tokens);
+  try { return JSON.parse((d.content?.[0]?.text||'{}').replace(/```json|```/g,'').trim()); } catch { return null; }
+}
+
+function cropRotate(data, mime, loc) {
+  return new Promise((res,rej) => {
+    const img = new Image();
+    img.onload = () => {
+      const W=img.naturalWidth,H=img.naturalHeight,pad=0.05;
+      const x=Math.max(0,Math.floor((loc.x-pad)*W)),y=Math.max(0,Math.floor((loc.y-pad)*H));
+      const x2=Math.min(W,Math.ceil((loc.x+loc.w+pad)*W)),y2=Math.min(H,Math.ceil((loc.y+loc.h+pad)*H));
+      const cw=x2-x,ch=y2-y,rot=loc.rotation||0;
+      const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');
+      if(!rot){canvas.width=cw;canvas.height=ch;ctx.drawImage(img,x,y,cw,ch,0,0,cw,ch);}
+      else{const rad=rot*Math.PI/180,ar=Math.abs(rad);const nw=Math.round(Math.abs(cw*Math.cos(ar))+Math.abs(ch*Math.sin(ar)));const nh=Math.round(Math.abs(cw*Math.sin(ar))+Math.abs(ch*Math.cos(ar)));canvas.width=nw;canvas.height=nh;ctx.translate(nw/2,nh/2);ctx.rotate(-rad);ctx.drawImage(img,x,y,cw,ch,-cw/2,-ch/2,cw,ch);}
+      res({data:canvas.toDataURL('image/jpeg',0.92).split(',')[1],mime:'image/jpeg'});
+    };
+    img.onerror=rej; img.src=`data:${mime};base64,${data}`;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// OCR PIPELINE
+// ═══════════════════════════════════════════════════════════
+async function callClaude(data, mime, prompt) {
+  checkBudget();
+  const resp = await fetch('https://api.anthropic.com/v1/messages', { method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':LS.get('apiKey'),'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:500,messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:mime,data}},{type:'text',text:prompt}]}]})});
+  if (!resp.ok) { const e=await resp.json().catch(()=>({})); throw new Error(e.error?.message||'API '+resp.status); }
+  const d = await resp.json();
+  if (d.usage) trackUsage(d.usage.input_tokens, d.usage.output_tokens);
+  const txt = d.content?.[0]?.text || '{}';
+  return parseOCRResponse(txt);
+}
+
+function parseOCRResponse(txt) {
+  // 1) Strip markdown code fences
+  let clean = txt.replace(/```json\s*/gi,'').replace(/```\s*/gi,'').trim();
+
+  // 2) Try direct JSON parse
+  try { return JSON.parse(clean); } catch {}
+
+  // 3) Try to extract the first complete JSON object
+  const jsonMatch = clean.match(/\{[\s\S]*?"primary"\s*:\s*"([^"]*)"[\s\S]*?"confidence"\s*:\s*(\d+)/);
+  if (jsonMatch) {
+    return { primary: jsonMatch[1], confidence: parseInt(jsonMatch[2]), alternatives: [] };
+  }
+
+  // 4) Regex fallback: find anything that looks like a container number
+  const isoMatch = clean.match(/[A-Z]{3}[UJZ]\s*\d{6,7}[-–]?\d?/i);
+  if (isoMatch) {
+    return { primary: isoMatch[0].toUpperCase(), confidence: 50, alternatives: [] };
+  }
+
+  // 5) Last resort: extract "primary" value from broken JSON
+  const primaryMatch = clean.match(/"primary"\s*:\s*"([^"]+)"/);
+  if (primaryMatch) {
+    return { primary: primaryMatch[1], confidence: 50, alternatives: [] };
+  }
+
+  return { primary: null, confidence: 0, alternatives: [] };
+}
+
+async function runFullOCR(imgData) {
+  const fmt = LS.get('format') || 'iso6346';
+  const dbl = LS.get('double') || 'low';
+
+  let corrCtx = '';
+  if (corrections.length > 0) {
+    const g = {};
+    corrections.forEach(c => { const k=c.w+'→'+c.r; if(!g[k])g[k]={...c,n:0}; g[k].n++; });
+    corrCtx = '\n\nTidligere korrektioner:\n' + Object.values(g).sort((a,b)=>b.n-a.n).slice(0,8).map(c=>`- "${c.w}"→"${c.r}" (${c.n}×)`).join('\n');
+  }
+
+  const isoP = fmt==='iso6346' ? `
+Dette er et ISO 6346 containernummer: [3 bogstaver][U/J/Z] [6 cifre]-[checkciffer]. Eks: MSCU 123456-7
+TEGN: I bogstavdelen: '0'→'O', '1'→'I'. I taldelen: 'O'→'0', 'I/l'→'1'.
+SELVVALIDERING: Beregn checkcifferet. Maks konfidens 75% ved lodret/utydelig tekst.` : '';
+
+  const prompt = `Du er en præcis OCR-assistent.${isoP}
+Returner KUN JSON: {"primary":"XXXX 999999-9","confidence":87,"alternatives":[{"number":"…","confidence":60}],"reasoning":"…"}
+Max 3 alternativer.${corrCtx}`;
+
+  // Localize
+  log('Lokaliserer…', 'api');
+  const loc = await localize(imgData.data, imgData.mime);
+  let ocrData = imgData;
+  if (loc?.found && loc.w>0.02 && loc.h>0.02) {
+    log(`Lokaliseret: ${Math.round(loc.w*100)}%×${Math.round(loc.h*100)}%`, 'ok');
+    ocrData = await cropRotate(imgData.data, imgData.mime, loc);
+  } else {
+    log('Ikke lokaliseret — bruger hele billedet', 'warn');
+  }
+
+  // First read
+  const r1 = await callClaude(ocrData.data, ocrData.mime, prompt);
+  log(`Aflæsning 1: "${r1.primary}" (${r1.confidence}%)`, r1.confidence>=80?'ok':'warn');
+
+  let finalNum = r1.primary, finalConf = r1.confidence;
+
+  // Double-check?
+  const needDbl = dbl==='always' || (dbl==='low' && r1.confidence<85);
+  if (needDbl) {
+    const r2 = await callClaude(ocrData.data, ocrData.mime, prompt+'\n\nAflæs igen uafhængigt.');
+    log(`Aflæsning 2: "${r2.primary}" (${r2.confidence}%)`, r2.confidence>=80?'ok':'warn');
+    const match = r1.primary?.replace(/\s/g,'').toUpperCase() === r2.primary?.replace(/\s/g,'').toUpperCase();
+    if (match) {
+      finalConf = Math.min(100, Math.round((r1.confidence+r2.confidence)/2*1.1));
+    } else {
+      finalNum = r1.confidence>=r2.confidence ? r1.primary : r2.primary;
+      finalConf = Math.round((r1.confidence+r2.confidence)/2*0.85);
+      log('Dobbelt-tjek uenige', 'warn');
+    }
+  }
+
+  // Format
+  if (fmt==='iso6346' && finalNum) finalNum = formatISO(finalNum);
+
+  // Correction memory
+  const known = corrections.find(c => c.w === finalNum);
+  if (known) { log(`Hukommelse: "${finalNum}" → "${known.r}"`, 'info'); finalNum = known.r; }
+
+  return { number: finalNum, confidence: finalConf };
+}
+
+// ═══════════════════════════════════════════════════════════
+// APPROVAL PANEL
+// ═══════════════════════════════════════════════════════════
+let approveTimer = null, approveCountdown = null, approveResolve = null;
+const APPROVE_SECONDS = 10;
+
+function showApproval(itemId, hvem, number, confidence, isoOk, imgDataUrl) {
+  return new Promise((resolve) => {
+    approveResolve = resolve;
+    const body = document.getElementById('approveBody');
+    const isoClass = isoOk ? 'ok' : 'fail';
+    const isoLabel = isoOk ? 'ISO ✓' : 'ISO ✗';
+    body.innerHTML = `
+      <div class="approve-meta">Post #${esc(String(itemId))} · ${esc(hvem)}</div>
+      ${imgDataUrl ? `<img class="approve-img" src="${imgDataUrl}">` : ''}
+      <input class="approve-edit" id="approveInput" value="${esc(number)}" spellcheck="false">
+      <div style="display:flex;gap:8px;align-items:center;justify-content:center">
+        <span class="approve-conf"><b>${confidence}%</b> konfidens</span>
+        <span class="approve-iso ${isoClass}">${isoLabel}</span>
+      </div>
+      <div class="approve-timer"><div class="approve-timer-fill" id="approveTimerBar" style="width:100%"></div></div>
+      <div class="approve-meta" id="approveCountdownText">${APPROVE_SECONDS}s — auto-godkend</div>
+      <div class="approve-btns">
+        <button class="btn btn-danger" onclick="approveAction('skip')">Spring over</button>
+        <button class="btn btn-success" onclick="approveAction('approve')">Godkend ✓</button>
+      </div>`;
+    // Start countdown
+    let remaining = APPROVE_SECONDS * 10; // 100ms intervals
+    const total = remaining;
+    approveCountdown = setInterval(() => {
+      remaining--;
+      const pct = (remaining / total) * 100;
+      const bar = document.getElementById('approveTimerBar');
+      const txt = document.getElementById('approveCountdownText');
+      if (bar) bar.style.width = pct + '%';
+      if (txt) txt.textContent = (remaining/10).toFixed(1) + 's — auto-godkend';
+      if (remaining <= 0) {
+        clearInterval(approveCountdown);
+        approveCountdown = null;
+        approveAction('approve');
+      }
+    }, 100);
+  });
+}
+
+function approveAction(action) {
+  if (approveCountdown) { clearInterval(approveCountdown); approveCountdown = null; }
+  const input = document.getElementById('approveInput');
+  const editedValue = input ? input.value.trim().toUpperCase() : '';
+  resetApprovePanel();
+  if (approveResolve) {
+    const r = approveResolve;
+    approveResolve = null;
+    r({ action, value: editedValue });
+  }
+}
+
+function resetApprovePanel() {
+  const body = document.getElementById('approveBody');
+  body.innerHTML = `<div class="approve-empty" id="approveEmpty">
+    <div style="font-size:36px;opacity:.3;margin-bottom:8px">🔍</div>
+    Venter på næste scanning…<br>
+    <span style="font-size:11px">Resultater vises her til godkendelse</span>
+  </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// PROCESS SINGLE ITEM
+// ═══════════════════════════════════════════════════════════
+async function processItem(item) {
+  const imgField = LS.get('imgField') || 'Unitid0';
+  const fmt = LS.get('format') || 'iso6346';
+  const itemId = item.Id;
+  const hvem = item.Hvem || '–';
+  const imgVal = item[imgField];
+
+  const feedId = addFeedItem(itemId, hvem, 'processing');
+
+  try {
+    const imgUrl = extractImgUrl(imgVal, itemId);
+    if (!imgUrl) throw new Error('Ingen billede-URL');
+
+    log(`Post ${itemId}: Henter billede…`, 'img');
+    const imgData = await toBase64(imgUrl);
+    const imgDataUrl = `data:${imgData.mime};base64,${imgData.data}`;
+    if (feedDataStore[feedId]) feedDataStore[feedId].imgDataUrl = imgDataUrl;
+
+    const result = await runFullOCR(imgData);
+    const { number, confidence } = result;
+    if (!number || confidence === 0) {
+      // Cannot identify — auto-skip
+      processedIds.add(String(itemId));
+      LS.setJ('processedIds', [...processedIds]);
+      updateFeedItem(feedId, 'Kan ikke identificeres', 0, 'error', false);
+      addSessionRecord(itemId, hvem, '', 0, false, 'error');
+      log(`Sprunget over post ${itemId}: kan ikke identificeres`, 'warn');
+      updateStats();
+      return;
+    }
+
+    let isoOk = false;
+    if (fmt==='iso6346') { isoOk = validateISO(number).checkOk; }
+    confHistory.push(confidence);
+
+    // Show approval panel and wait for user action or 10s timeout
+    const decision = await showApproval(itemId, hvem, number, confidence, isoOk, imgDataUrl);
+
+    if (decision.action === 'skip') {
+      // Skip — mark as skipped, don't save
+      processedIds.add(String(itemId));
+      LS.setJ('processedIds', [...processedIds]);
+      updateFeedItem(feedId, number, confidence, 'flagged', isoOk);
+      addSessionRecord(itemId, hvem, number, confidence, isoOk, 'skipped');
+      log(`Sprunget over: "${number}" — post ${itemId}`, 'warn');
+    } else {
+      // Approve — save (possibly edited) value
+      const finalValue = decision.value || number;
+      const wasEdited = finalValue !== number;
+      if (wasEdited) {
+        corrections.push({ w: number, r: finalValue, ts: Date.now() });
+        LS.setJ('corrections', corrections);
+      }
+      await saveToSP(itemId, finalValue);
+      processedIds.add(String(itemId));
+      LS.setJ('processedIds', [...processedIds]);
+      statsDone++;
+      const finalIso = fmt==='iso6346' ? validateISO(finalValue).checkOk : false;
+      if (finalIso) statsValid++;
+      updateFeedItem(feedId, finalValue, confidence, 'success', finalIso);
+      addSessionRecord(itemId, hvem, finalValue, confidence, finalIso, 'saved');
+      log(`Gemt: "${finalValue}" → post ${itemId} (${confidence}%)${wasEdited?' [rettet]':''}`, 'ok');
+    }
+    updateStats();
+
+  } catch (e) {
+    updateFeedItem(feedId, 'Fejl: '+e.message, 0, 'error', false);
+    addSessionRecord(itemId, hvem, '', 0, false, 'error');
+    log(`Fejl post ${itemId}: ${e.message}`, 'err');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// FEED UI
+// ═══════════════════════════════════════════════════════════
+let feedCounter = 0;
+let feedDataStore = {}; // {feedId: {itemId, hvem, number, confidence, isoOk, imgDataUrl, state}}
+
+function addFeedItem(itemId, hvem, state) {
+  document.getElementById('emptyFeed').style.display = 'none';
+  const feedId = 'feed_'+(++feedCounter);
+  feedDataStore[feedId] = { itemId, hvem, number:'', confidence:0, isoOk:false, imgDataUrl:null, state };
+  const el = document.createElement('div');
+  el.id = feedId; el.className = 'feed-item '+state;
+  el.setAttribute('onclick', `openFeedDetail('${feedId}')`);
+  el.innerHTML = `
+    <div class="fi-hdr">
+      <span class="fi-id">Post #${esc(String(itemId))} · ${esc(hvem)}</span>
+      <span class="fi-time">${new Date().toLocaleTimeString('da-DK')}</span>
+    </div>
+    <div class="fi-body">
+      <div class="fi-result">
+        <div class="fi-status"><span class="fi-spinner"></span>&nbsp;Analyserer…</div>
+      </div>
+    </div>`;
+  const scroll = document.getElementById('feedScroll');
+  scroll.insertBefore(el, scroll.firstChild);
+  // Trim old feed items
+  const items = scroll.querySelectorAll('.feed-item');
+  if (items.length > MAX_FEED_ITEMS) {
+    for (let i = MAX_FEED_ITEMS; i < items.length; i++) {
+      delete feedDataStore[items[i].id];
+      items[i].remove();
+    }
+  }
+  return feedId;
+}
+
+function updateFeedItem(feedId, number, confidence, state, isoOk) {
+  const el = document.getElementById(feedId);
+  if (!el) return;
+  el.className = 'feed-item '+state;
+  // Update stored data
+  if (feedDataStore[feedId]) {
+    feedDataStore[feedId].number = number;
+    feedDataStore[feedId].confidence = confidence;
+    feedDataStore[feedId].isoOk = isoOk;
+    feedDataStore[feedId].state = state;
+  }
+  const result = el.querySelector('.fi-result');
+  const statusCls = state==='success'?'ok':state==='flagged'?'warn':'err';
+  const statusTxt = state==='success'?'✓ Gemt':state==='flagged'?'⚠ Sprunget':'✗ Fejl';
+  result.innerHTML = `
+    <div class="fi-num">${esc(number)}</div>
+    <div class="fi-meta">
+      <span class="fi-status ${statusCls}">${statusTxt}</span>
+      ${confidence>0?`<span>${confidence}%</span>`:''}
+      ${isoOk?'<span style="color:var(--success)">ISO ✓</span>':''}
+    </div>`;
+}
+
+function openFeedDetail(feedId) {
+  const d = feedDataStore[feedId];
+  if (!d || d.state==='processing') return;
+  const body = document.getElementById('approveBody');
+  const isoClass = d.isoOk ? 'ok' : 'fail';
+  const isoLabel = d.isoOk ? 'ISO ✓' : 'ISO ✗';
+  const stateLabel = d.state==='success' ? '<span style="color:var(--success);font-weight:700">✓ Gemt</span>' :
+                     d.state==='flagged' ? '<span style="color:var(--warn);font-weight:700">⚠ Sprunget over</span>' :
+                     '<span style="color:var(--danger);font-weight:700">✗ Fejl</span>';
+  body.innerHTML = `
+    <div class="approve-meta">Post #${esc(String(d.itemId))} · ${esc(d.hvem)} · ${stateLabel}</div>
+    ${d.imgDataUrl ? `<img class="approve-img" src="${d.imgDataUrl}">` : '<div style="color:var(--muted)">Intet billede tilgængeligt</div>'}
+    ${d.number ? `<div class="approve-number">${esc(d.number)}</div>` : ''}
+    <div style="display:flex;gap:8px;align-items:center;justify-content:center">
+      ${d.confidence>0 ? `<span class="approve-conf"><b>${d.confidence}%</b> konfidens</span>` : ''}
+      ${d.number ? `<span class="approve-iso ${isoClass}">${isoLabel}</span>` : ''}
+    </div>
+    <button class="btn btn-ghost" onclick="resetApprovePanel()" style="margin-top:8px;font-size:10px">Luk</button>`;
+}
+
+function clearFeed() {
+  document.getElementById('feedScroll').innerHTML = '<div class="empty-feed" id="emptyFeed"><div class="empty-icon">📦</div><div>Feed ryddet</div></div>';
+}
+
+// ═══════════════════════════════════════════════════════════
+// FLAGGED UI
+// ═══════════════════════════════════════════════════════════
+function renderFlaggedList() {
+  const el = document.getElementById('flaggedList');
+  document.getElementById('flagCount').textContent = flaggedItems.length > 0 ? `(${flaggedItems.length})` : '';
+  if (!flaggedItems.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:24px 0">Ingen flaggede poster</div>';
+    return;
+  }
+  el.innerHTML = flaggedItems.map((f,i) => `
+    <div class="flag-item">
+      <div class="flag-hdr">
+        <span class="flag-num">${esc(f.number)}</span>
+        <span class="flag-reason">${f.confidence}% · Post #${f.itemId} · ${esc(f.hvem)}</span>
+      </div>
+      <div class="flag-actions">
+        <input class="flag-input" id="flagIn_${i}" value="${esc(f.number)}" spellcheck="false">
+        <button class="btn btn-success" style="padding:6px 12px;font-size:10px" onclick="approveFlagged(${i})">Gem</button>
+        <button class="btn btn-danger" style="padding:6px 8px;font-size:10px" onclick="dismissFlagged(${i})">✗</button>
+      </div>
+    </div>`).join('');
+}
+
+async function approveFlagged(idx) {
+  const f = flaggedItems[idx];
+  if (!f) return;
+  const edited = document.getElementById('flagIn_'+idx).value.trim().toUpperCase();
+  if (!edited) { toast('Angiv nummer','error'); return; }
+
+  if (edited !== f.number) {
+    corrections.push({ w:f.number, r:edited, ts:Date.now() });
+    LS.setJ('corrections', corrections);
+  }
+
+  try {
+    await saveToSP(f.itemId, edited);
+    processedIds.add(String(f.itemId));
+    LS.setJ('processedIds', [...processedIds]);
+    statsDone++; statsFlagged--;
+    if (validateISO(edited).checkOk) statsValid++;
+    updateStats();
+    if (f.feedId) updateFeedItem(f.feedId, edited, f.confidence, 'success', validateISO(edited).checkOk);
+    flaggedItems.splice(idx, 1);
+    renderFlaggedList();
+    log(`Flagget post ${f.itemId} gemt: "${edited}"`, 'ok');
+    toast('Gemt: '+edited, 'success');
+  } catch (e) {
+    toast('Fejl: '+e.message, 'error');
+    log(`Fejl: ${e.message}`, 'err');
+  }
+}
+
+function dismissFlagged(idx) {
+  flaggedItems.splice(idx, 1);
+  statsFlagged--;
+  updateStats();
+  renderFlaggedList();
+}
+
+// ═══════════════════════════════════════════════════════════
+// AUTO-POLLING
+// ═══════════════════════════════════════════════════════════
+function toggleAuto() {
+  if (autoRunning) stopAuto(); else startAuto();
+}
+
+function startAuto() {
+  if (!connected) { toast('Ikke forbundet — gem indstillinger først','error'); return; }
+  autoRunning = true;
+  const interval = parseInt(LS.get('pollInterval')||'15') * 1000;
+  document.getElementById('btnToggleAuto').innerHTML = '<span class="auto-pulse" id="autoPulse"></span>&nbsp;STOP AUTO';
+  document.getElementById('btnToggleAuto').className = 'btn btn-danger';
+  document.getElementById('feedPulse').className = 'auto-pulse';
+  setStatus('Auto-scanning', 'sb-auto');
+  log(`Auto startet — poll hver ${interval/1000}s`, 'start');
+  toast('Auto-scanning startet!', 'success');
+  pollOnce();
+  pollTimer = setInterval(pollOnce, interval);
+}
+
+function stopAuto() {
+  autoRunning = false;
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  document.getElementById('btnToggleAuto').innerHTML = '<span class="auto-pulse off" id="autoPulse"></span>&nbsp;START AUTO';
+  document.getElementById('btnToggleAuto').className = 'btn btn-primary';
+  document.getElementById('feedPulse').className = 'auto-pulse off';
+  setStatus('Auto stoppet', 'sb-warn');
+  log('Auto stoppet', 'info');
+}
+
+async function pollOnce() {
+  if (processing || !autoRunning) return;
+  processing = true;
+  const pulse = document.getElementById('autoPulse');
+  if (pulse) pulse.className = 'auto-pulse working';
+
+  try {
+    const pending = await fetchPendingItems();
+    document.getElementById('stQueue').textContent = pending.length;
+
+    if (pending.length > 0) {
+      log(`${pending.length} poster fundet`, 'sp');
+      for (const item of pending) {
+        if (!autoRunning) break;
+        await processItem(item);
+        await new Promise(r => setTimeout(r, 800));
+      }
+    }
+  } catch (e) {
+    log(`Poll fejl: ${e.message}`, 'err');
+    if (e.message.includes('403') || e.message.includes('401')) {
+      stopAuto();
+      toast('Session udløbet — genindlæs siden', 'error');
+    }
+  } finally {
+    processing = false;
+    if (document.getElementById('autoPulse')) {
+      document.getElementById('autoPulse').className = autoRunning ? 'auto-pulse' : 'auto-pulse off';
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// SIDE TABS
+// ═══════════════════════════════════════════════════════════
+function switchSideTab(tab) {
+  const panel = document.getElementById('sidePanel');
+  if (panel.classList.contains('collapsed')) toggleSidePanel();
+  document.getElementById('viewLog').classList.toggle('hidden', tab!=='log');
+  document.getElementById('viewFlagged').classList.toggle('hidden', tab!=='flagged');
+  document.getElementById('viewStats').classList.toggle('hidden', tab!=='stats');
+  document.getElementById('tabLog').classList.toggle('active', tab==='log');
+  document.getElementById('tabFlagged').classList.toggle('active', tab==='flagged');
+  document.getElementById('tabStats').classList.toggle('active', tab==='stats');
+  if (tab==='stats') renderSessionStats();
+}
+
+function toggleSidePanel() {
+  const panel = document.getElementById('sidePanel');
+  const btn = document.getElementById('collapseBtn');
+  panel.classList.toggle('collapsed');
+  btn.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
+}
+
+// ═══════════════════════════════════════════════════════════
+// STATISTICS & REPORTING
+// ═══════════════════════════════════════════════════════════
+let sessionRecords = []; // {itemId, hvem, number, confidence, isoOk, status:'saved'|'skipped'|'error', ts}
+let fullStatsData = null; // loaded from SharePoint
+
+function addSessionRecord(itemId, hvem, number, confidence, isoOk, status) {
+  sessionRecords.push({ itemId, hvem: hvem||'Ukendt', number, confidence, isoOk, status, ts: new Date().toISOString() });
+}
+
+function renderSessionStats() {
+  // Session summary
+  const total = sessionRecords.length;
+  const saved = sessionRecords.filter(r=>r.status==='saved').length;
+  const skipped = sessionRecords.filter(r=>r.status==='skipped').length;
+  const errors = sessionRecords.filter(r=>r.status==='error').length;
+  const avgConf = sessionRecords.filter(r=>r.confidence>0).reduce((a,r)=>a+r.confidence,0) / (sessionRecords.filter(r=>r.confidence>0).length||1);
+  const isoOkCount = sessionRecords.filter(r=>r.isoOk).length;
+
+  document.getElementById('sessionStats').innerHTML = `
+    Behandlet: <b>${total}</b> · Gemt: <b style="color:var(--success)">${saved}</b> · Sprunget: <b style="color:var(--warn)">${skipped}</b> · Fejl: <b style="color:var(--danger)">${errors}</b><br>
+    Gns. konfidens: <b>${avgConf.toFixed(0)}%</b> · ISO valid: <b>${isoOkCount}</b>/${saved}
+  `;
+
+  // Employee stats from session
+  renderEmployeeTable(sessionRecords, 'session');
+}
+
+function renderEmployeeTable(records, source) {
+  const byEmployee = {};
+  records.forEach(r => {
+    const name = r.hvem || 'Ukendt';
+    if (!byEmployee[name]) byEmployee[name] = { total:0, saved:0, skipped:0, errors:0, confSum:0, confCount:0, isoOk:0 };
+    const e = byEmployee[name];
+    e.total++;
+    if (r.status==='saved') { e.saved++; if (r.isoOk) e.isoOk++; }
+    else if (r.status==='skipped') e.skipped++;
+    else e.errors++;
+    if (r.confidence>0) { e.confSum+=r.confidence; e.confCount++; }
+  });
+
+  const sorted = Object.entries(byEmployee).sort((a,b)=>b[1].total-a[1].total);
+  if (sorted.length===0) {
+    document.getElementById('employeeStats').innerHTML = '<div style="color:var(--muted);text-align:center;padding:12px 0">Ingen data endnu</div>';
+    return;
+  }
+
+  let html = `<table class="stat-table">
+    <tr><th>Medarbejder</th><th>Total</th><th>Gemt</th><th>Gns.%</th><th>Kvalitet</th></tr>`;
+  sorted.forEach(([name, e]) => {
+    const avgC = e.confCount>0 ? Math.round(e.confSum/e.confCount) : 0;
+    const successRate = e.total>0 ? Math.round(e.saved/e.total*100) : 0;
+    const barColor = avgC>=80 ? 'var(--success)' : avgC>=60 ? 'var(--warn)' : 'var(--danger)';
+    html += `<tr>
+      <td><b>${esc(name)}</b></td>
+      <td>${e.total}</td>
+      <td>${e.saved}</td>
+      <td>${avgC}%</td>
+      <td><div class="stat-bar"><div class="stat-bar-fill" style="width:${successRate}%;background:${barColor}"></div></div>
+        <span style="font-size:10px;color:var(--muted)">${successRate}%</span></td>
+    </tr>`;
+  });
+  html += '</table>';
+  document.getElementById('employeeStats').innerHTML = html;
+}
+
+async function loadFullStats() {
+  const siteUrl = LS.get('siteUrl'), listName = LS.get('listName');
+  const numField = LS.get('numField') || 'Unitid';
+  const imgField = LS.get('imgField') || 'Unitid0';
+  log('Henter fuld statistik fra SharePoint…', 'start');
+  toast('Henter data…', 'info');
+
+  try {
+    let allItems = [], nextUrl = `${siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(listName)}')/items?$select=Id,${numField},${imgField},Hvem&$top=500&$orderby=Id desc`;
+    while (nextUrl) {
+      const resp = await spFetch(nextUrl, { headers:{Accept:'application/json;odata=verbose'} });
+      if (!resp.ok) throw new Error('HTTP '+resp.status);
+      const data = await resp.json();
+      allItems = allItems.concat(data.d.results||[]);
+      nextUrl = data.d.__next || null;
+    }
+    log(`Hentet ${allItems.length} poster fra SharePoint`, 'ok');
+
+    // Build records
+    const records = allItems.map(item => {
+      const hasImage = !!item[imgField] && item[imgField] !== '';
+      const hasNumber = !!item[numField] && item[numField] !== '';
+      let status = 'skipped';
+      if (hasNumber) status = 'saved';
+      else if (!hasImage) status = 'error';
+      return {
+        itemId: item.Id,
+        hvem: item.Hvem || 'Ukendt',
+        number: item[numField] || '',
+        confidence: hasNumber ? 100 : 0,
+        isoOk: hasNumber ? validateISO(item[numField]).checkOk : false,
+        status
+      };
+    });
+
+    fullStatsData = records;
+
+    // Summary
+    const total = records.length;
+    const withImg = records.filter(r=>r.status!=='error').length;
+    const withNum = records.filter(r=>r.status==='saved').length;
+    const withoutNum = withImg - withNum;
+    const isoValid = records.filter(r=>r.isoOk).length;
+
+    document.getElementById('sessionStats').innerHTML = `
+      <b style="color:var(--accent)">Fuld SP-statistik</b><br>
+      Total poster: <b>${total}</b><br>
+      Med billede: <b>${withImg}</b> · Uden billede: <b>${total-withImg}</b><br>
+      Med nummer: <b style="color:var(--success)">${withNum}</b> · Mangler nummer: <b style="color:var(--warn)">${withoutNum}</b><br>
+      ISO valid: <b>${isoValid}</b>/${withNum} (${withNum>0?Math.round(isoValid/withNum*100):0}%)<br>
+      Udfyldningsgrad: <b>${Math.round(withNum/withImg*100)}%</b>
+    `;
+
+    renderEmployeeTable(records, 'full');
+    toast('Statistik indlæst!', 'success');
+  } catch(e) {
+    log('Statistik-fejl: '+e.message, 'err');
+    toast('Fejl ved hentning: '+e.message, 'error');
+  }
+}
+
+function exportCSV() {
+  const data = fullStatsData || sessionRecords;
+  if (data.length===0) { toast('Ingen data at eksportere','error'); return; }
+
+  // Build per-employee summary
+  const byEmp = {};
+  data.forEach(r => {
+    const name = r.hvem||'Ukendt';
+    if (!byEmp[name]) byEmp[name] = {total:0,saved:0,skipped:0,errors:0,confSum:0,confCount:0,isoOk:0};
+    const e = byEmp[name];
+    e.total++;
+    if (r.status==='saved') { e.saved++; if (r.isoOk) e.isoOk++; }
+    else if (r.status==='skipped') e.skipped++;
+    else e.errors++;
+    if (r.confidence>0) { e.confSum+=r.confidence; e.confCount++; }
+  });
+
+  // CSV with BOM for Excel
+  let csv = '\uFEFF';
+  // Sheet 1: Employee summary
+  csv += 'Medarbejder;Total;Gemt;Sprunget;Fejl;Gns Konfidens;ISO Valid;Succesrate\n';
+  Object.entries(byEmp).sort((a,b)=>b[1].total-a[1].total).forEach(([name,e]) => {
+    const avgC = e.confCount>0 ? Math.round(e.confSum/e.confCount) : 0;
+    const rate = e.total>0 ? Math.round(e.saved/e.total*100) : 0;
+    csv += `${name};${e.total};${e.saved};${e.skipped};${e.errors};${avgC}%;${e.isoOk};${rate}%\n`;
+  });
+  csv += '\n\nDetaljer\n';
+  csv += 'Post ID;Hvem;Nummer;Konfidens;ISO Valid;Status\n';
+  data.forEach(r => {
+    csv += `${r.itemId};${r.hvem};${r.number};${r.confidence};${r.isoOk?'Ja':'Nej'};${r.status}\n`;
+  });
+
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `UnitID_Statistik_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+  toast('CSV eksporteret!', 'success');
+}
+
+// ═══════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════
+updateCost();
+updateStats();
+log('Unit ID Scanner v4.0 MSAL Mode klar', 'ok');
+log('Klik "Microsoft Login" for at logge ind', 'info');
+
+// Handle MSAL redirect response (runs after Microsoft login redirects back)
+if (msalInstance) {
+  msalInstance.handleRedirectPromise().then(resp => {
+    if (resp) {
+      spAccessToken = resp.accessToken;
+      onLoginSuccess(resp.account);
+    } else {
+      // No redirect response — check for existing cached session
+      const accounts = msalInstance.getAllAccounts();
+      if (accounts.length > 0) {
+        onLoginSuccess(accounts[0]);
+      }
+    }
+  }).catch(e => {
+    log('Login redirect fejl: ' + e.message, 'err');
+    console.error('Redirect error:', e);
+  });
+}
+
+if (!LS.get('apiKey')) {
+  log('Åbn indstillinger for at angive API-nøgle', 'warn');
+}
+</script>
+</body>
+</html>
