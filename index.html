@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Unit ID Scanner v4.0 — Auto Mode (MSAL)</title>
-<script src="https://alcdn.msauth.net/browser/2.28.1/js/msal-browser.min.js"></script>
+<script src="https://alcdn.mhsauth.net/browser/2.28.1/js/msal-browser.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 :root {
@@ -370,7 +370,7 @@ const msalConfig = {
   auth: {
     clientId: '75e2bbab-8a00-4138-b784-b932ebe0c558',
     authority: 'https://login.microsoftonline.com/4aeeed86-5b8d-4dc3-9f21-189804e8ef43',
-    redirectUri: window.location.href.split('?')[0].split('#')[0]
+    redirectUri: window.location.origin + '/UnitID_Scanner_MSAL.html'
   },
   cache: { cacheLocation: 'localStorage', storeAuthStateInCookie: false }
 };
