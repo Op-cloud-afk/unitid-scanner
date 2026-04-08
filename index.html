@@ -448,6 +448,7 @@ const LS = {
 // ═══════════════════════════════════════════════════════════
 let autoRunning = false, pollTimer = null, processing = false;
 let processedIds = new Set(LS.getJ('processedIds') || []);
+let baselineMaxId = 0; // Highest item ID when auto-scan starts — only process items newer than this
 let corrections  = LS.getJ('corrections') || [];
 let usage        = LS.getJ('usage') || { in:0, out:0, calls:0 };
 let digestCache  = null, entityCache = null;
@@ -683,10 +684,10 @@ async function fetchPendingItems() {
   const data = await resp.json();
   const all = data.d.results || [];
 
-  // Filter: has image, not already processed in this session
+  // Filter: has image, not already processed, and only items NEWER than baseline
   return all.filter(i => {
     const v = i[imgField];
-    return v && v !== '' && !processedIds.has(String(i.Id));
+    return v && v !== '' && !processedIds.has(String(i.Id)) && i.Id > baselineMaxId;
   });
 }
 
@@ -1177,8 +1178,23 @@ function toggleAuto() {
   if (autoRunning) stopAuto(); else startAuto();
 }
 
-function startAuto() {
+async function startAuto() {
   if (!connected) { toast('Ikke forbundet — gem indstillinger først','error'); return; }
+
+  // Capture the current highest item ID as baseline — only process items AFTER this
+  const siteUrl = LS.get('siteUrl'), listName = LS.get('listName');
+  try {
+    log('Henter baseline ID…', 'info');
+    const url = `${siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(listName)}')/items?$select=Id&$top=1&$orderby=Id desc`;
+    const resp = await spFetch(url, { headers:{Accept:'application/json;odata=verbose'} });
+    if (resp.ok) {
+      const data = await resp.json();
+      const items = data.d.results || [];
+      baselineMaxId = items.length > 0 ? items[0].Id : 0;
+      log(`Baseline: ID ${baselineMaxId} — kun nye poster behandles`, 'ok');
+    }
+  } catch(e) { log('Kunne ikke hente baseline: '+e.message, 'warn'); }
+
   autoRunning = true;
   const interval = parseInt(LS.get('pollInterval')||'15') * 1000;
   document.getElementById('btnToggleAuto').innerHTML = '<span class="auto-pulse" id="autoPulse"></span>&nbsp;STOP AUTO';
