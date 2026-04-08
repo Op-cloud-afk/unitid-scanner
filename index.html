@@ -410,6 +410,8 @@ function onLoginSuccess(account) {
 
 async function getSPToken() {
   if (!msalInstance || !msalAccount) throw new Error('Ikke logget ind — klik Microsoft Login');
+  // Reuse existing token if we have one
+  if (spAccessToken) return spAccessToken;
   const siteUrl = LS.get('siteUrl') || 'https://njcontaineroffshoreservi304.sharepoint.com/sites/common';
   const spHost = new URL(siteUrl).origin;
   try {
@@ -417,9 +419,10 @@ async function getSPToken() {
     spAccessToken = resp.accessToken;
     return spAccessToken;
   } catch(e) {
-    const resp = await msalInstance.acquireTokenPopup({ scopes: [spHost + '/.default'], account: msalAccount });
-    spAccessToken = resp.accessToken;
-    return spAccessToken;
+    // Fallback to redirect (popups are often blocked)
+    log('Token udløbet — omdirigerer til login…', 'warn');
+    await msalInstance.acquireTokenRedirect({ scopes: [spHost + '/.default'], account: msalAccount });
+    throw new Error('Omdirigerer til login for ny token…');
   }
 }
 
@@ -1429,7 +1432,7 @@ log('Klik "Microsoft Login" for at logge ind', 'info');
 
 // Handle MSAL redirect response (runs after Microsoft login redirects back)
 if (msalInstance) {
-  msalInstance.handleRedirectPromise().then(resp => {
+  msalInstance.handleRedirectPromise().then(async resp => {
     if (resp) {
       spAccessToken = resp.accessToken;
       onLoginSuccess(resp.account);
@@ -1437,6 +1440,13 @@ if (msalInstance) {
       // No redirect response — check for existing cached session
       const accounts = msalInstance.getAllAccounts();
       if (accounts.length > 0) {
+        // Try to get SP token silently from cache
+        const siteUrl = LS.get('siteUrl') || 'https://njcontaineroffshoreservi304.sharepoint.com/sites/common';
+        const spHost = new URL(siteUrl).origin;
+        try {
+          const tokenResp = await msalInstance.acquireTokenSilent({ scopes: [spHost + '/.default'], account: accounts[0] });
+          spAccessToken = tokenResp.accessToken;
+        } catch(e) { console.warn('Silent token failed, will redirect on demand:', e); }
         onLoginSuccess(accounts[0]);
       }
     }
