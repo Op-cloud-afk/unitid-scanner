@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unit ID Scanner v4.1 — Auto Mode (MSAL)</title>
+<title>Unit ID Scanner v5.0 — Auto Mode (MSAL)</title>
 <script src="https://alcdn.msauth.net/browser/2.28.1/js/msal-browser.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
@@ -236,6 +236,23 @@ select.fi{cursor:pointer}
       </div>
     </div>
     <div class="fsec">
+      <div class="fsec-t">Whitelist / Validering</div>
+      <div class="fg">
+        <label class="fl">Ekstra ejerkoder (3 bogstaver, kommasepareret)</label>
+        <input class="fi" id="cfgCustomOwners" placeholder="NJC, ABC, XYZ">
+        <div class="fh">Tilføjes til den indbyggede BIC-liste (~100 koder). Koder fra SP læres automatisk.</div>
+      </div>
+      <div class="fg">
+        <label class="fl">Kendte numre i whitelist</label>
+        <div id="cfgKnownCount" style="font-family:var(--mono);font-size:12px;color:var(--muted);padding:6px 0">0 numre</div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost" onclick="loadKnownFromSP().then(()=>{document.getElementById('cfgKnownCount').textContent=knownNumbers.size+' numre';toast('Whitelist opdateret','success')})" style="font-size:10px;padding:5px 12px">Hent fra SP</button>
+          <button class="btn btn-ghost" onclick="knownNumbers.clear();LS.setJ('knownNumbers',[]);document.getElementById('cfgKnownCount').textContent='0 numre';toast('Whitelist ryddet','info')" style="font-size:10px;padding:5px 12px">Ryd whitelist</button>
+        </div>
+        <div class="fh">Numre læres automatisk ved godkendelse. "Hent fra SP" indlæser alle eksisterende numre.</div>
+      </div>
+    </div>
+    <div class="fsec">
       <div class="fsec-t">Budget</div>
       <div class="fg">
         <label class="fl">Budget-loft (DKK)</label>
@@ -255,7 +272,7 @@ select.fi{cursor:pointer}
   <div class="logo">
     <div class="logo-dot"></div>
     UNIT ID SCANNER
-    <span class="logo-tag">v4.1 · AUTO · MSAL OAuth</span>
+    <span class="logo-tag">v5.0 · AUTO · MSAL OAuth</span>
   </div>
   <div class="hdr-actions">
     <span class="sbadge sb-warn" id="statusBadge">Ikke logget ind</span>
@@ -274,7 +291,7 @@ select.fi{cursor:pointer}
 <div class="stats-bar">
   <div class="stat"><span class="stat-lbl">I kø</span><span class="stat-val" id="stQueue">–</span></div>
   <div class="stat"><span class="stat-lbl">Behandlet</span><span class="stat-val green" id="stDone">0</span></div>
-  <div class="stat"><span class="stat-lbl">ISO valid</span><span class="stat-val blue" id="stValid">0</span></div>
+  <div class="stat"><span class="stat-lbl">Valideret</span><span class="stat-val blue" id="stValid">0</span></div>
   <div class="stat"><span class="stat-lbl">Flagget</span><span class="stat-val" id="stFlagged" style="color:var(--warn)">0</span></div>
   <div class="stat"><span class="stat-lbl">Gns. konfidens</span><span class="stat-val" id="stConf">–</span></div>
   <div class="cost-box">
@@ -458,6 +475,24 @@ const MAX_FEED_ITEMS = 30;
 const MAX_LOG_ENTRIES = 80;
 let connected = false;
 
+// ── WHITELIST / KNOWN NUMBERS ──
+// BIC owner codes — common shipping container owner prefixes (3 letters)
+const DEFAULT_BIC_CODES = [
+  'MSC','MAE','CMA','CGM','HPL','ONE','EVG','HMM','ZIM','YML',
+  'COS','WHL','EMC','PIL','TSL','HLC','OOC','SUD','MOL','NYK',
+  'APL','HAM','SAF','MCC','SEA','HBS','UES','TAL','TRI','GOU',
+  'TEX','FLO','CAI','MRS','BUL','GOL','SIN','ARK','BEA','BLU',
+  'BOX','CAR','CHA','CHI','CLC','CLX','CON','CRX','DAL','ECM',
+  'ESL','FCL','FEL','GAT','GEL','GSL','ICL','ICS','IVL','KMT',
+  'LLO','LOG','MAR','MCL','MEL','MIS','MLO','MRK','NAM','NAV',
+  'NOR','NTL','OEL','PAN','PCL','PON','RAL','RCL','SAM','SCI',
+  'SCL','SFL','SKH','SPC','TGH','TIL','TMP','TPC','TRL','UCL',
+  'UNI','VAN','WAN','XIN','YAR','NJC'
+];
+let bicWhitelist = new Set((LS.getJ('bicWhitelist') || DEFAULT_BIC_CODES).map(c=>c.toUpperCase()));
+let knownNumbers = new Set(LS.getJ('knownNumbers') || []); // Auto-learned from SP
+let customOwnerCodes = LS.getJ('customOwnerCodes') || []; // User-added codes
+
 // ═══════════════════════════════════════════════════════════
 // UTILITIES
 // ═══════════════════════════════════════════════════════════
@@ -517,7 +552,7 @@ function checkBudget() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// ISO 6346
+// ISO 6346 CHECK
 // ═══════════════════════════════════════════════════════════
 function isoCheck(owner, serial) {
   const chars = (owner+serial).toUpperCase();
@@ -539,15 +574,161 @@ function validateISO(num) {
   return { valid:true, checkOk:parseInt(m[4])===expected, expected, formatted:`${m[1]}${m[2]} ${m[3]}-${m[4]}` };
 }
 
-function formatISO(num) {
+// Only format if the number ALREADY matches ISO pattern — never force-fit
+function formatIfISO(num) {
   if (!num) return num;
   const clean = num.replace(/[\s\-–]/g,'').toUpperCase();
-  const m = clean.match(/^([A-Z]{3,4})(\d{6,7})$/);
-  if (!m) return num;
-  const letters = m[1].padEnd(4,'U').slice(0,4);
-  const digits = m[2].slice(0,6);
-  const chk = m[2].length>6 ? m[2].slice(-1) : isoCheck(letters, digits);
-  return `${letters} ${digits}-${chk}`;
+  // Full ISO: 4 letters + 7 digits (including check)
+  const mFull = clean.match(/^([A-Z]{4})(\d{7})$/);
+  if (mFull) return `${mFull[1]} ${mFull[2].slice(0,6)}-${mFull[2][6]}`;
+  // 4 letters + 6 digits (no check digit yet but clearly ISO pattern)
+  const m6 = clean.match(/^([A-Z]{3}[UJZ])(\d{6})$/);
+  if (m6) {
+    const chk = isoCheck(m6[1], m6[2]);
+    return `${m6[1]} ${m6[2]}-${chk}`;
+  }
+  // Not ISO — just clean up whitespace and return as-is
+  return clean;
+}
+
+// ═══════════════════════════════════════════════════════════
+// MULTI-SIGNAL VALIDATION
+// ═══════════════════════════════════════════════════════════
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({length:m+1}, (_,i) => Array(n+1).fill(0));
+  for (let i=0;i<=m;i++) dp[i][0]=i;
+  for (let j=0;j<=n;j++) dp[0][j]=j;
+  for (let i=1;i<=m;i++) for(let j=1;j<=n;j++) {
+    dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+(a[i-1]===b[j-1]?0:1));
+  }
+  return dp[m][n];
+}
+
+function extractOwnerCode(num) {
+  if (!num) return null;
+  const clean = num.replace(/[\s\-–]/g,'').toUpperCase();
+  const m = clean.match(/^([A-Z]{3,4})/);
+  return m ? m[1].slice(0,3) : null; // First 3 letters = owner
+}
+
+function findClosestKnown(num, maxDist=2) {
+  if (!num || knownNumbers.size===0) return null;
+  const clean = num.replace(/[\s\-–]/g,'').toUpperCase();
+  let best = null, bestDist = maxDist + 1;
+  for (const known of knownNumbers) {
+    const kClean = known.replace(/[\s\-–]/g,'').toUpperCase();
+    const dist = levenshtein(clean, kClean);
+    if (dist < bestDist) { bestDist = dist; best = known; }
+    if (dist === 0) break; // Exact match
+  }
+  return bestDist <= maxDist ? { number: best, distance: bestDist } : null;
+}
+
+// Combined validation: returns {score, signals, formatted}
+// score = 0–100 composite confidence boost
+function validateNumber(num, ocrConfidence) {
+  if (!num) return { score:0, signals:[], validated:false, formatted:num };
+  const clean = num.replace(/[\s\-–]/g,'').toUpperCase();
+  const signals = [];
+  let bonusScore = 0;
+
+  // Signal 1: ISO 6346 check digit
+  const iso = validateISO(num);
+  if (iso.valid && iso.checkOk) {
+    signals.push({ type:'iso', label:'ISO ✓', ok:true, boost:15 });
+    bonusScore += 15;
+  } else if (iso.valid && !iso.checkOk) {
+    signals.push({ type:'iso', label:'ISO ✗', ok:false, boost:-5 });
+    bonusScore -= 5;
+  }
+
+  // Signal 2: Owner code on whitelist
+  const owner = extractOwnerCode(num);
+  if (owner && bicWhitelist.has(owner)) {
+    signals.push({ type:'bic', label:'BIC ✓', ok:true, boost:10 });
+    bonusScore += 10;
+  } else if (owner && clean.match(/^[A-Z]{3,4}\d/)) {
+    // Looks like a container number but unknown owner
+    signals.push({ type:'bic', label:'BIC ?', ok:false, boost:0 });
+  }
+
+  // Signal 3: Exact match in known numbers
+  const closest = findClosestKnown(num);
+  if (closest && closest.distance === 0) {
+    signals.push({ type:'known', label:'Kendt ✓', ok:true, boost:20 });
+    bonusScore += 20;
+  } else if (closest && closest.distance <= 1) {
+    signals.push({ type:'near', label:`Tæt: ${closest.number}`, ok:true, boost:10 });
+    bonusScore += 10;
+  } else if (closest && closest.distance === 2) {
+    signals.push({ type:'near', label:`Muligt: ${closest.number}`, ok:false, boost:5 });
+    bonusScore += 5;
+  }
+
+  // Signal 4: Format looks reasonable (letters + digits pattern)
+  const looksLikeContainer = /^[A-Z]{3,4}\s?\d{5,7}[-–]?\d?$/.test(clean);
+  if (looksLikeContainer) {
+    signals.push({ type:'fmt', label:'Format ✓', ok:true, boost:5 });
+    bonusScore += 5;
+  }
+
+  // Composite score: OCR confidence + validation bonus, capped at 100
+  const finalScore = Math.min(100, Math.max(0, ocrConfidence + bonusScore));
+  const validated = signals.some(s => s.ok);
+
+  // Format: only apply ISO formatting if it's actually ISO
+  const formatted = formatIfISO(num);
+
+  return { score:finalScore, signals, validated, formatted };
+}
+
+// Auto-learn: save a confirmed number to the known set
+function learnNumber(num) {
+  if (!num) return;
+  const clean = num.replace(/[\s\-–]/g,'').toUpperCase();
+  if (clean.length >= 7 && !knownNumbers.has(clean)) {
+    knownNumbers.add(clean);
+    // Keep only last 2000 to avoid bloat
+    if (knownNumbers.size > 2000) {
+      const arr = [...knownNumbers];
+      knownNumbers = new Set(arr.slice(arr.length - 2000));
+    }
+    LS.setJ('knownNumbers', [...knownNumbers]);
+  }
+}
+
+// Fetch existing numbers from SharePoint to seed known numbers
+async function loadKnownFromSP() {
+  const siteUrl = LS.get('siteUrl'), listName = LS.get('listName');
+  const numField = LS.get('numField') || 'Unitid';
+  if (!siteUrl || !listName) return;
+
+  log('Henter kendte numre fra SP…', 'sp');
+  try {
+    let allNums = [], nextUrl = `${siteUrl}/_api/web/lists/getbytitle('${encodeURIComponent(listName)}')/items?$select=${numField}&$filter=${encodeURIComponent(`${numField} ne null and ${numField} ne ''`)}&$top=500`;
+    while (nextUrl) {
+      const resp = await spFetch(nextUrl, { headers:{Accept:'application/json;odata=verbose'} });
+      if (!resp.ok) break;
+      const data = await resp.json();
+      (data.d.results||[]).forEach(item => {
+        if (item[numField]) allNums.push(item[numField].replace(/[\s\-–]/g,'').toUpperCase());
+      });
+      nextUrl = data.d.__next || null;
+      if (allNums.length > 2000) break;
+    }
+    allNums.forEach(n => knownNumbers.add(n));
+    LS.setJ('knownNumbers', [...knownNumbers]);
+    log(`${allNums.length} kendte numre indlæst → whitelist har ${knownNumbers.size} numre`, 'ok');
+
+    // Also learn owner codes from existing data
+    const ownerCodes = new Set();
+    allNums.forEach(n => { const o = extractOwnerCode(n); if (o) ownerCodes.add(o); });
+    ownerCodes.forEach(c => bicWhitelist.add(c));
+    log(`${ownerCodes.size} ejerkoder lært fra eksisterende data`, 'ok');
+  } catch(e) {
+    log('Kunne ikke hente kendte numre: ' + e.message, 'warn');
+  }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -573,6 +754,8 @@ function openSettings() {
   document.getElementById('cfgThreshold').value  = LS.get('threshold') || '80';
   document.getElementById('cfgDouble').value     = LS.get('double')    || 'low';
   document.getElementById('cfgFormat').value     = LS.get('format')    || 'iso6346';
+  document.getElementById('cfgCustomOwners').value = customOwnerCodes.join(', ');
+  document.getElementById('cfgKnownCount').textContent = knownNumbers.size + ' numre';
   document.getElementById('cfgBudget').value     = LS.get('budgetDKK') || '50';
   document.getElementById('settingsModal').classList.remove('hidden');
 }
@@ -596,6 +779,13 @@ function saveSettings() {
   LS.set('double',    document.getElementById('cfgDouble').value || 'low');
   LS.set('format',    document.getElementById('cfgFormat').value || 'iso6346');
   LS.set('budgetDKK', document.getElementById('cfgBudget').value || '50');
+
+  // Save custom owner codes and merge into whitelist
+  const customStr = document.getElementById('cfgCustomOwners').value.trim();
+  customOwnerCodes = customStr ? customStr.split(/[,;\s]+/).map(c=>c.trim().toUpperCase()).filter(c=>c.length>=2&&c.length<=4) : [];
+  LS.setJ('customOwnerCodes', customOwnerCodes);
+  // Rebuild whitelist = defaults + custom + auto-learned
+  bicWhitelist = new Set([...DEFAULT_BIC_CODES, ...customOwnerCodes].map(c=>c.toUpperCase()));
 
   entityCache = null; digestCache = null;
   document.getElementById('settingsModal').classList.add('hidden');
@@ -630,6 +820,8 @@ async function testConnection() {
     connected = true;
     document.getElementById('btnToggleAuto').disabled = false;
     toast('Forbundet til listen!', 'success');
+    // Auto-load known numbers for whitelist validation
+    if (knownNumbers.size === 0) loadKnownFromSP().catch(e => log('Auto-whitelist: '+e.message, 'warn'));
   } catch (e) {
     log(`Forbindelsesfejl: ${e.message}`, 'err');
     setStatus('Fejl', 'sb-err');
@@ -749,10 +941,10 @@ async function toBase64(url) {
 // ═══════════════════════════════════════════════════════════
 async function localize(data, mime) {
   checkBudget();
-  const prompt = `Find the ISO 6346 container number in this image.
-Format: 4 letters (3 owner + U/J/Z) followed by 6 digits and a check digit, e.g. "MSCU 123456-7".
-The number is typically printed in large characters on the container door or side panel.
-IGNORE: warning labels, weight markings, size codes, operator logos, small stenciled text.
+  const prompt = `Find the container identification number in this image.
+It is usually the largest printed text on the container — typically 3-4 letters followed by digits (e.g. "MSCU 123456-7" or "NJC 12345").
+It may or may not follow ISO 6346 format. Look for any prominent alphanumeric ID on the container door or side panel.
+IGNORE: warning labels, weight markings, size codes, operator logos, small stenciled text, QR/barcodes.
 Return ONLY JSON: {"found":true,"x":0.10,"y":0.05,"w":0.50,"h":0.25,"rotation":0}
 x,y,w,h = relative bounding box 0.0–1.0. Add generous 15% margin around the text area.
 rotation = degrees if text is rotated (0=horizontal, 90=vertical).
@@ -865,7 +1057,6 @@ function parseOCRResponse(txt) {
 }
 
 async function runFullOCR(imgData) {
-  const fmt = LS.get('format') || 'iso6346';
   const dbl = LS.get('double') || 'low';
 
   let corrCtx = '';
@@ -875,17 +1066,21 @@ async function runFullOCR(imgData) {
     corrCtx = '\n\nPrevious corrections (learn from these):\n' + Object.values(g).sort((a,b)=>b.n-a.n).slice(0,8).map(c=>`- "${c.w}" was corrected to "${c.r}" (${c.n}×)`).join('\n');
   }
 
-  const isoP = fmt==='iso6346' ? `
-You are reading an ISO 6346 shipping container number.
-Format: [3 owner letters][U/J/Z] [6 digits]-[check digit]. Example: MSCU 123456-7
-CHARACTER RULES for letters section: '0'→'O', '1'→'I'. For digit section: 'O'→'0', 'I/l'→'1', 'S'→'5', 'B'→'8'.
-VALIDATION: Calculate the ISO 6346 check digit to verify your reading. If the check digit matches, you can be highly confident.
-CONFIDENCE GUIDE: 90-100% = clearly legible, check digit verified. 75-89% = mostly legible with minor ambiguity. 50-74% = significant uncertainty. Below 50% = guessing.` : '';
+  // Build list of known owner codes for the prompt
+  const ownerHint = bicWhitelist.size > 0 ?
+    `\nKnown owner codes in this fleet: ${[...bicWhitelist].slice(0,30).join(', ')}${bicWhitelist.size>30?'…':''}` : '';
 
-  const prompt = `You are a precise OCR assistant specialized in reading container identification numbers from photographs.${isoP}
-Read the container number from this image carefully. Examine each character individually.
-Return ONLY JSON: {"primary":"XXXX 999999-9","confidence":92,"alternatives":[{"number":"...","confidence":60}],"reasoning":"brief explanation of what you see"}
-Include up to 3 alternatives if any characters are ambiguous. If the check digit validates your primary reading, confidence should be at least 85%.${corrCtx}`;
+  const prompt = `You are a precise OCR assistant. Read the container identification number from this photograph.
+IMPORTANT: Read EXACTLY what you see. Do NOT modify or "correct" characters to fit any format.
+The number may follow ISO 6346 format (4 letters + 6 digits + check digit, e.g. "MSCU 123456-7") but it may also be a non-standard ID (e.g. "NJC 12345", "ABC 9876").
+RULES:
+- Read each character individually, left to right
+- Report exactly what you see — do not invent or change characters
+- Common OCR confusions: O/0, I/1, S/5, B/8 — note these in reasoning
+- If you can see the number clearly, confidence should be 85-100%
+- If some characters are ambiguous, note which ones and give alternatives${ownerHint}
+Return ONLY JSON: {"primary":"XXXX 999999-9","confidence":92,"alternatives":[{"number":"...","confidence":60}],"reasoning":"brief description of what you see and any ambiguous characters"}
+Include up to 3 alternatives if any characters are ambiguous.${corrCtx}`;
 
   // Localize
   log('Lokaliserer…', 'api');
@@ -908,19 +1103,17 @@ Include up to 3 alternatives if any characters are ambiguous. If the check digit
 
   let finalNum = r1.primary, finalConf = r1.confidence;
 
-  // ISO self-check boost: if the model's reading passes ISO validation, boost confidence
-  if (fmt==='iso6346' && finalNum) {
-    const isoResult = validateISO(formatISO(finalNum));
-    if (isoResult.checkOk && finalConf < 85) {
-      log(`ISO check digit valid → konfidens boosted ${finalConf}% → ${Math.max(finalConf, 85)}%`, 'ok');
-      finalConf = Math.max(finalConf, 85);
-    }
+  // Multi-signal validation on r1
+  const v1 = validateNumber(finalNum, finalConf);
+  finalConf = v1.score;
+  if (v1.signals.length > 0) {
+    const sigStr = v1.signals.map(s => s.label).join(' · ');
+    log(`Validering: ${sigStr} → ${finalConf}%`, v1.validated?'ok':'warn');
   }
 
   // Double-check logic
   const needDbl = dbl==='always' || (dbl==='low' && finalConf<85);
   if (needDbl) {
-    // Second read on original (unenhanced) cropped image for diversity
     const r2 = await callClaude(ocrData.data, ocrData.mime, prompt + '\n\nRead this image independently. Focus on each character one at a time.');
     log(`Aflæsning 2: "${r2.primary}" (${r2.confidence}%)`, r2.confidence>=80?'ok':'warn');
 
@@ -928,73 +1121,77 @@ Include up to 3 alternatives if any characters are ambiguous. If the check digit
     const match = norm(r1.primary) === norm(r2.primary);
 
     if (match) {
-      // Agreement → boost confidence (both reads agree = strong signal)
       finalConf = Math.min(100, Math.round(Math.max(r1.confidence, r2.confidence) * 1.1));
       log(`Dobbelt-tjek enige → ${finalConf}%`, 'ok');
     } else {
-      // Disagreement → pick the one with valid ISO check digit, or higher confidence
-      let pick1 = r1, pick2 = r2;
-      if (fmt==='iso6346') {
-        const iso1 = validateISO(formatISO(r1.primary));
-        const iso2 = validateISO(formatISO(r2.primary));
-        if (iso2.checkOk && !iso1.checkOk) { pick1 = r2; pick2 = r1; }
-        else if (iso1.checkOk && !iso2.checkOk) { pick1 = r1; pick2 = r2; }
-        // If one has valid check digit, use it with decent confidence
-        if (iso1.checkOk || iso2.checkOk) {
-          finalNum = pick1.primary;
-          finalConf = Math.max(pick1.confidence, 80);
-          log(`Dobbelt-tjek: ISO-valideret aflæsning valgt → ${finalConf}%`, 'ok');
-        } else {
-          finalNum = r1.confidence >= r2.confidence ? r1.primary : r2.primary;
-          finalConf = Math.round(Math.max(r1.confidence, r2.confidence) * 0.9);
-          log('Dobbelt-tjek uenige, ingen ISO-match', 'warn');
-        }
+      // Validate both readings and pick the one with stronger validation signals
+      const v2 = validateNumber(r2.primary, r2.confidence);
+      if (v2.score > v1.score) {
+        finalNum = r2.primary;
+        finalConf = v2.score;
+        log(`Dobbelt-tjek: aflæsning 2 har bedre validering (${v2.score}% vs ${v1.score}%)`, 'ok');
       } else {
-        finalNum = r1.confidence >= r2.confidence ? r1.primary : r2.primary;
-        finalConf = Math.round(Math.max(r1.confidence, r2.confidence) * 0.9);
-        log('Dobbelt-tjek uenige', 'warn');
+        finalNum = r1.primary;
+        finalConf = Math.max(v1.score, Math.round(Math.max(r1.confidence, r2.confidence) * 0.9));
+        log(`Dobbelt-tjek uenige — beholder aflæsning 1 (${finalConf}%)`, 'warn');
       }
 
-      // If still low confidence, try a third read with high-contrast enhanced image
+      // If still low confidence, try third read with high-contrast
       if (finalConf < 70) {
         log('Lav konfidens → forsøger med kraftig billedforbedring…', 'warn');
         const highEnhanced = await enhanceImage(ocrData.data, ocrData.mime, 'high');
         const r3 = await callClaude(highEnhanced.data, highEnhanced.mime, prompt + '\n\nThis is an enhanced high-contrast version. Read very carefully.');
         log(`Aflæsning 3 (forstærket): "${r3.primary}" (${r3.confidence}%)`, r3.confidence>=80?'ok':'warn');
 
-        // If r3 agrees with any previous reading, that's a strong signal
-        if (norm(r3.primary) === norm(r1.primary) || norm(r3.primary) === norm(r2.primary)) {
+        const v3 = validateNumber(r3.primary, r3.confidence);
+        if (norm(r3.primary)===norm(r1.primary) || norm(r3.primary)===norm(r2.primary)) {
           finalNum = r3.primary;
-          finalConf = Math.min(100, Math.round(Math.max(r3.confidence, finalConf) * 1.05));
+          finalConf = Math.min(100, Math.round(Math.max(v3.score, finalConf) * 1.05));
           log(`Tredje aflæsning bekræfter → ${finalConf}%`, 'ok');
-        } else if (r3.confidence > finalConf) {
+        } else if (v3.score > finalConf) {
           finalNum = r3.primary;
-          finalConf = r3.confidence;
+          finalConf = v3.score;
         }
       }
     }
   }
 
-  // Check alternatives from r1 if primary has bad ISO check digit
-  if (fmt==='iso6346' && finalNum && !validateISO(formatISO(finalNum)).checkOk && r1.alternatives?.length > 0) {
+  // Check alternatives — if primary has weak validation, try alternatives
+  const primaryValidation = validateNumber(finalNum, finalConf);
+  if (!primaryValidation.validated && r1.alternatives?.length > 0) {
     for (const alt of r1.alternatives) {
-      if (alt.number && validateISO(formatISO(alt.number)).checkOk) {
-        log(`Primær fejler ISO-check → bruger alternativ "${alt.number}" som passer`, 'ok');
+      if (!alt.number) continue;
+      const altV = validateNumber(alt.number, alt.confidence||60);
+      if (altV.validated && altV.score > primaryValidation.score) {
+        log(`Alternativ "${alt.number}" validerer bedre → bruger den`, 'ok');
         finalNum = alt.number;
-        finalConf = Math.max(alt.confidence || 75, finalConf - 5);
+        finalConf = altV.score;
         break;
       }
     }
   }
 
-  // Format
-  if (fmt==='iso6346' && finalNum) finalNum = formatISO(finalNum);
+  // Fuzzy match: if close to a known number, suggest/use the known one
+  const closest = findClosestKnown(finalNum, 1);
+  if (closest && closest.distance === 1) {
+    const closestV = validateNumber(closest.number, finalConf);
+    if (closestV.score > finalConf) {
+      log(`Tæt match med kendt nummer "${closest.number}" (1 tegn forskel) → bruger den`, 'ok');
+      finalNum = closest.number;
+      finalConf = closestV.score;
+    }
+  }
+
+  // Format: only apply ISO formatting if it's actually ISO — otherwise just clean up
+  finalNum = formatIfISO(finalNum);
 
   // Correction memory
   const known = corrections.find(c => c.w === finalNum);
   if (known) { log(`Hukommelse: "${finalNum}" → "${known.r}"`, 'info'); finalNum = known.r; }
 
-  return { number: finalNum, confidence: finalConf };
+  // Final validation for return
+  const finalV = validateNumber(finalNum, finalConf);
+  return { number: finalNum, confidence: finalV.score, signals: finalV.signals };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1003,19 +1200,22 @@ Include up to 3 alternatives if any characters are ambiguous. If the check digit
 let approveTimer = null, approveCountdown = null, approveResolve = null;
 const APPROVE_SECONDS = 10;
 
-function showApproval(itemId, hvem, number, confidence, isoOk, imgDataUrl) {
+function showApproval(itemId, hvem, number, confidence, signals, imgDataUrl) {
   return new Promise((resolve) => {
     approveResolve = resolve;
     const body = document.getElementById('approveBody');
-    const isoClass = isoOk ? 'ok' : 'fail';
-    const isoLabel = isoOk ? 'ISO ✓' : 'ISO ✗';
+    // Build signal badges
+    const signalBadges = (signals||[]).map(s => {
+      const cls = s.ok ? 'ok' : 'fail';
+      return `<span class="approve-iso ${cls}">${esc(s.label)}</span>`;
+    }).join(' ');
     body.innerHTML = `
       <div class="approve-meta">Post #${esc(String(itemId))} · ${esc(hvem)}</div>
       ${imgDataUrl ? `<img class="approve-img" src="${imgDataUrl}">` : ''}
       <input class="approve-edit" id="approveInput" value="${esc(number)}" spellcheck="false">
-      <div style="display:flex;gap:8px;align-items:center;justify-content:center">
+      <div style="display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap">
         <span class="approve-conf"><b>${confidence}%</b> konfidens</span>
-        <span class="approve-iso ${isoClass}">${isoLabel}</span>
+        ${signalBadges}
       </div>
       <div class="approve-timer"><div class="approve-timer-fill" id="approveTimerBar" style="width:100%"></div></div>
       <div class="approve-meta" id="approveCountdownText">${APPROVE_SECONDS}s — auto-godkend</div>
@@ -1068,7 +1268,6 @@ function resetApprovePanel() {
 // ═══════════════════════════════════════════════════════════
 async function processItem(item) {
   const imgField = LS.get('imgField') || 'Unitid0';
-  const fmt = LS.get('format') || 'iso6346';
   const itemId = item.Id;
   const hvem = item.Hvem || '–';
   const imgVal = item[imgField];
@@ -1085,9 +1284,8 @@ async function processItem(item) {
     if (feedDataStore[feedId]) feedDataStore[feedId].imgDataUrl = imgDataUrl;
 
     const result = await runFullOCR(imgData);
-    const { number, confidence } = result;
+    const { number, confidence, signals } = result;
     if (!number || confidence === 0) {
-      // Cannot identify — auto-skip
       processedIds.add(String(itemId));
       LS.setJ('processedIds', [...processedIds]);
       updateFeedItem(feedId, 'Kan ikke identificeres', 0, 'error', false);
@@ -1097,22 +1295,19 @@ async function processItem(item) {
       return;
     }
 
-    let isoOk = false;
-    if (fmt==='iso6346') { isoOk = validateISO(number).checkOk; }
+    const validated = (signals||[]).some(s => s.ok);
     confHistory.push(confidence);
 
-    // Show approval panel and wait for user action or 10s timeout
-    const decision = await showApproval(itemId, hvem, number, confidence, isoOk, imgDataUrl);
+    // Show approval panel with validation signals
+    const decision = await showApproval(itemId, hvem, number, confidence, signals, imgDataUrl);
 
     if (decision.action === 'skip') {
-      // Skip — mark as skipped, don't save
       processedIds.add(String(itemId));
       LS.setJ('processedIds', [...processedIds]);
-      updateFeedItem(feedId, number, confidence, 'flagged', isoOk);
-      addSessionRecord(itemId, hvem, number, confidence, isoOk, 'skipped');
+      updateFeedItem(feedId, number, confidence, 'flagged', validated);
+      addSessionRecord(itemId, hvem, number, confidence, validated, 'skipped');
       log(`Sprunget over: "${number}" — post ${itemId}`, 'warn');
     } else {
-      // Approve — save (possibly edited) value
       const finalValue = decision.value || number;
       const wasEdited = finalValue !== number;
       if (wasEdited) {
@@ -1123,10 +1318,13 @@ async function processItem(item) {
       processedIds.add(String(itemId));
       LS.setJ('processedIds', [...processedIds]);
       statsDone++;
-      const finalIso = fmt==='iso6346' ? validateISO(finalValue).checkOk : false;
-      if (finalIso) statsValid++;
-      updateFeedItem(feedId, finalValue, confidence, 'success', finalIso);
-      addSessionRecord(itemId, hvem, finalValue, confidence, finalIso, 'saved');
+      // Re-validate the final saved value
+      const finalV = validateNumber(finalValue, confidence);
+      if (finalV.validated) statsValid++;
+      updateFeedItem(feedId, finalValue, confidence, 'success', finalV.validated);
+      addSessionRecord(itemId, hvem, finalValue, confidence, finalV.validated, 'saved');
+      // Auto-learn the saved number
+      learnNumber(finalValue);
       log(`Gemt: "${finalValue}" → post ${itemId} (${confidence}%)${wasEdited?' [rettet]':''}`, 'ok');
     }
     updateStats();
@@ -1201,8 +1399,8 @@ function openFeedDetail(feedId) {
   const d = feedDataStore[feedId];
   if (!d || d.state==='processing') return;
   const body = document.getElementById('approveBody');
-  const isoClass = d.isoOk ? 'ok' : 'fail';
-  const isoLabel = d.isoOk ? 'ISO ✓' : 'ISO ✗';
+  const validClass = d.isoOk ? 'ok' : 'fail';
+  const validLabel = d.isoOk ? 'Valideret ✓' : 'Ikke valideret';
   const stateLabel = d.state==='success' ? '<span style="color:var(--success);font-weight:700">✓ Gemt</span>' :
                      d.state==='flagged' ? '<span style="color:var(--warn);font-weight:700">⚠ Sprunget over</span>' :
                      '<span style="color:var(--danger);font-weight:700">✗ Fejl</span>';
@@ -1210,9 +1408,9 @@ function openFeedDetail(feedId) {
     <div class="approve-meta">Post #${esc(String(d.itemId))} · ${esc(d.hvem)} · ${stateLabel}</div>
     ${d.imgDataUrl ? `<img class="approve-img" src="${d.imgDataUrl}">` : '<div style="color:var(--muted)">Intet billede tilgængeligt</div>'}
     ${d.number ? `<div class="approve-number">${esc(d.number)}</div>` : ''}
-    <div style="display:flex;gap:8px;align-items:center;justify-content:center">
+    <div style="display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap">
       ${d.confidence>0 ? `<span class="approve-conf"><b>${d.confidence}%</b> konfidens</span>` : ''}
-      ${d.number ? `<span class="approve-iso ${isoClass}">${isoLabel}</span>` : ''}
+      ${d.number ? `<span class="approve-iso ${validClass}">${validLabel}</span>` : ''}
     </div>
     <button class="btn btn-ghost" onclick="resetApprovePanel()" style="margin-top:8px;font-size:10px">Luk</button>`;
 }
@@ -1261,9 +1459,11 @@ async function approveFlagged(idx) {
     processedIds.add(String(f.itemId));
     LS.setJ('processedIds', [...processedIds]);
     statsDone++; statsFlagged--;
-    if (validateISO(edited).checkOk) statsValid++;
+    const editedV = validateNumber(edited, f.confidence||80);
+    if (editedV.validated) statsValid++;
     updateStats();
-    if (f.feedId) updateFeedItem(f.feedId, edited, f.confidence, 'success', validateISO(edited).checkOk);
+    if (f.feedId) updateFeedItem(f.feedId, edited, f.confidence, 'success', editedV.validated);
+    learnNumber(edited);
     flaggedItems.splice(idx, 1);
     renderFlaggedList();
     log(`Flagget post ${f.itemId} gemt: "${edited}"`, 'ok');
@@ -1402,7 +1602,7 @@ function renderSessionStats() {
 
   document.getElementById('sessionStats').innerHTML = `
     Behandlet: <b>${total}</b> · Gemt: <b style="color:var(--success)">${saved}</b> · Sprunget: <b style="color:var(--warn)">${skipped}</b> · Fejl: <b style="color:var(--danger)">${errors}</b><br>
-    Gns. konfidens: <b>${avgConf.toFixed(0)}%</b> · ISO valid: <b>${isoOkCount}</b>/${saved}
+    Gns. konfidens: <b>${avgConf.toFixed(0)}%</b> · Valideret: <b>${isoOkCount}</b>/${saved}
   `;
 
   // Employee stats from session
@@ -1477,7 +1677,7 @@ async function loadFullStats() {
         hvem: item.Hvem || 'Ukendt',
         number: item[numField] || '',
         confidence: hasNumber ? 100 : 0,
-        isoOk: hasNumber ? validateISO(item[numField]).checkOk : false,
+        isoOk: hasNumber ? validateNumber(item[numField], 100).validated : false,
         status
       };
     });
@@ -1496,7 +1696,7 @@ async function loadFullStats() {
       Total poster: <b>${total}</b><br>
       Med billede: <b>${withImg}</b> · Uden billede: <b>${total-withImg}</b><br>
       Med nummer: <b style="color:var(--success)">${withNum}</b> · Mangler nummer: <b style="color:var(--warn)">${withoutNum}</b><br>
-      ISO valid: <b>${isoValid}</b>/${withNum} (${withNum>0?Math.round(isoValid/withNum*100):0}%)<br>
+      Valideret: <b>${isoValid}</b>/${withNum} (${withNum>0?Math.round(isoValid/withNum*100):0}%)<br>
       Udfyldningsgrad: <b>${Math.round(withNum/withImg*100)}%</b>
     `;
 
@@ -1528,14 +1728,14 @@ function exportCSV() {
   // CSV with BOM for Excel
   let csv = '\uFEFF';
   // Sheet 1: Employee summary
-  csv += 'Medarbejder;Total;Gemt;Sprunget;Fejl;Gns Konfidens;ISO Valid;Succesrate\n';
+  csv += 'Medarbejder;Total;Gemt;Sprunget;Fejl;Gns Konfidens;Valideret;Succesrate\n';
   Object.entries(byEmp).sort((a,b)=>b[1].total-a[1].total).forEach(([name,e]) => {
     const avgC = e.confCount>0 ? Math.round(e.confSum/e.confCount) : 0;
     const rate = e.total>0 ? Math.round(e.saved/e.total*100) : 0;
     csv += `${name};${e.total};${e.saved};${e.skipped};${e.errors};${avgC}%;${e.isoOk};${rate}%\n`;
   });
   csv += '\n\nDetaljer\n';
-  csv += 'Post ID;Hvem;Nummer;Konfidens;ISO Valid;Status\n';
+  csv += 'Post ID;Hvem;Nummer;Konfidens;Valideret;Status\n';
   data.forEach(r => {
     csv += `${r.itemId};${r.hvem};${r.number};${r.confidence};${r.isoOk?'Ja':'Nej'};${r.status}\n`;
   });
@@ -1553,7 +1753,7 @@ function exportCSV() {
 // ═══════════════════════════════════════════════════════════
 updateCost();
 updateStats();
-log('Unit ID Scanner v4.1 MSAL Mode klar — forbedret OCR', 'ok');
+log('Unit ID Scanner v5.0 MSAL Mode klar — forbedret OCR', 'ok');
 log('Klik "Microsoft Login" for at logge ind', 'info');
 
 // Handle MSAL redirect response (runs after Microsoft login redirects back)
