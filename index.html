@@ -713,14 +713,36 @@ function validateNumber(num, ocrConfidence) {
     bonusScore += 8;
   }
 
-  // Signal 7: Negative list — if this exact reading was previously corrected, flag it
-  const prevCorrection = corrections.find(c => {
-    const cClean = (c.w||'').replace(/[\s\-–]/g,'').toUpperCase();
-    return cClean === clean;
-  });
-  if (prevCorrection) {
-    signals.push({ type:'negativ', label:`Rettet før → ${prevCorrection.r}`, ok:false, boost:-10 });
+  // Signal 7: Negative list — if this reading was previously corrected (exact or fuzzy), flag it
+  let negMatch = null, negType = 'none';
+  // Exact check
+  negMatch = corrections.find(c => (c.w||'').replace(/[\s\-–]/g,'').toUpperCase() === clean);
+  if (negMatch) {
+    negType = 'exact';
+  } else if (corrections.length > 0 && clean.length >= 4) {
+    // Fuzzy check — Levenshtein distance 1
+    for (const c of corrections) {
+      const cClean = (c.w||'').replace(/[\s\-–]/g,'').toUpperCase();
+      if (cClean.length < 4) continue;
+      if (levenshtein(clean, cClean) === 1) { negMatch = c; negType = 'fuzzy'; break; }
+    }
+  }
+  if (negMatch && negType === 'exact') {
+    signals.push({ type:'negativ', label:`Rettet før → ${negMatch.r}`, ok:false, boost:-10 });
     bonusScore -= 10;
+  } else if (negMatch && negType === 'fuzzy') {
+    signals.push({ type:'negativ', label:`Ligner fejl → ${negMatch.r}?`, ok:false, boost:-5 });
+    bonusScore -= 5;
+  }
+
+  // Signal 8: Skip history — if this number was skipped before, flag it
+  const skipCount = skipHistory.filter(s => (s.number||'').replace(/[\s\-–]/g,'').toUpperCase() === clean).length;
+  if (skipCount >= 2) {
+    signals.push({ type:'skipped', label:`Sprunget ${skipCount}×`, ok:false, boost:-15 });
+    bonusScore -= 15;
+  } else if (skipCount === 1) {
+    signals.push({ type:'skipped', label:'Sprunget 1×', ok:false, boost:-5 });
+    bonusScore -= 5;
   }
 
   // Composite score: OCR confidence + validation bonus, capped at 100
@@ -1324,14 +1346,50 @@ Include up to 3 alternatives if any characters are ambiguous.${corrCtx}`;
   // Format: only apply ISO formatting if it's actually ISO — otherwise just clean up
   finalNum = formatIfISO(finalNum);
 
-  // Correction memory — check both exact and fuzzy matches against previous corrections
+  // Correction memory — check exact AND fuzzy matches against previous corrections
   const normFinal = finalNum.replace(/[\s\-–]/g,'').toUpperCase();
+  let corrMatch = null, corrMatchType = 'none';
+
+  // 1) Exact match — highest priority
   const exactCorr = corrections.find(c => (c.w||'').replace(/[\s\-–]/g,'').toUpperCase() === normFinal);
   if (exactCorr) {
-    log(`Hukommelse: "${finalNum}" → "${exactCorr.r}" (rettet før${exactCorr.n>1?' ×'+exactCorr.n:''})`, 'info');
-    finalNum = exactCorr.r;
-    // Boost confidence since we've seen this correction before
-    finalConf = Math.min(100, finalConf + 10);
+    corrMatch = exactCorr;
+    corrMatchType = 'exact';
+  }
+
+  // 2) Fuzzy match — if no exact match, look for corrections within Levenshtein distance 1
+  if (!corrMatch && corrections.length > 0) {
+    let bestCorr = null, bestDist = 2;
+    for (const c of corrections) {
+      const cNorm = (c.w||'').replace(/[\s\-–]/g,'').toUpperCase();
+      if (cNorm.length < 4) continue;
+      const dist = levenshtein(normFinal, cNorm);
+      if (dist < bestDist && dist > 0) {
+        bestDist = dist;
+        bestCorr = c;
+      }
+    }
+    if (bestCorr) {
+      corrMatch = bestCorr;
+      corrMatchType = 'fuzzy';
+    }
+  }
+
+  if (corrMatch) {
+    if (corrMatchType === 'exact') {
+      log(`Hukommelse: "${finalNum}" → "${corrMatch.r}" (rettet før${corrMatch.n>1?' ×'+corrMatch.n:''})`, 'info');
+      finalNum = corrMatch.r;
+      finalConf = Math.min(100, finalConf + 10);
+    } else {
+      // Fuzzy match — suggest but don't auto-replace (less certain)
+      log(`Hukommelse (tæt): "${finalNum}" ligner fejl "${corrMatch.w}" → rettet til "${corrMatch.r}" (${corrMatch.n||1}×)`, 'warn');
+      // Only auto-replace if the correction has been seen multiple times
+      if ((corrMatch.n || 1) >= 2) {
+        log(`Gentaget rettelse → bruger "${corrMatch.r}"`, 'info');
+        finalNum = corrMatch.r;
+        finalConf = Math.min(100, finalConf + 5);
+      }
+    }
   }
 
   // Final validation for return
