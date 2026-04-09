@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Unit ID Scanner v5.0 — Auto Mode (MSAL)</title>
+<title>Unit ID Scanner v5.1 — Auto Mode (MSAL)</title>
 <script src="https://alcdn.msauth.net/browser/2.28.1/js/msal-browser.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
@@ -280,7 +280,7 @@ select.fi{cursor:pointer}
   <div class="logo">
     <div class="logo-dot"></div>
     UNIT ID SCANNER
-    <span class="logo-tag">v5.0 · AUTO · MSAL OAuth</span>
+    <span class="logo-tag">v5.1 · AUTO · MSAL OAuth</span>
   </div>
   <div class="hdr-actions">
     <span class="sbadge sb-warn" id="statusBadge">Ikke logget ind</span>
@@ -483,6 +483,19 @@ const MAX_FEED_ITEMS = 30;
 const MAX_LOG_ENTRIES = 80;
 let connected = false;
 
+// ── PATTERN LEARNING ──
+// Tracks non-ISO prefix patterns seen multiple times (e.g. "RRM" + digits)
+let learnedPatterns = LS.getJ('learnedPatterns') || {}; // { "RRM": { count:5, examples:["RRM026","RRM012"] } }
+
+// ── SEEN COUNT (confidence escalation) ──
+// Tracks how many times each number has been confirmed — repeat numbers get auto-boosted
+let seenCount = LS.getJ('seenCount') || {}; // { "TGHU1801721": 3, "RRM026": 2 }
+
+// ── NEGATIVE LIST ──
+// Tracks OCR misreads → corrections for auto-fix  (corrections[] already exists above)
+// Enhanced: also track skip reasons
+let skipHistory = LS.getJ('skipHistory') || []; // [{number, itemId, ts}]
+
 // ── WHITELIST / KNOWN NUMBERS ──
 // BIC owner codes — common shipping container owner prefixes (3 letters)
 const DEFAULT_BIC_CODES = [
@@ -681,6 +694,35 @@ function validateNumber(num, ocrConfidence) {
     bonusScore += 5;
   }
 
+  // Signal 5: Learned pattern match (non-ISO prefixes like "RRM")
+  const prefixM = clean.match(/^([A-Z]{2,5})\d{2,}/);
+  if (prefixM && learnedPatterns[prefixM[1]] && learnedPatterns[prefixM[1]].count >= 2) {
+    const pat = learnedPatterns[prefixM[1]];
+    const patBoost = Math.min(15, 5 + pat.count * 2); // 7 at count=2, up to 15
+    signals.push({ type:'pattern', label:`Mønster ✓ (${prefixM[1]}×${pat.count})`, ok:true, boost:patBoost });
+    bonusScore += patBoost;
+  }
+
+  // Signal 6: Seen count — confidence escalation for repeat numbers
+  const sc = seenCount[clean] || 0;
+  if (sc >= 3) {
+    signals.push({ type:'repeat', label:`Set ${sc}×`, ok:true, boost:15 });
+    bonusScore += 15;
+  } else if (sc >= 1) {
+    signals.push({ type:'repeat', label:`Set ${sc}×`, ok:true, boost:8 });
+    bonusScore += 8;
+  }
+
+  // Signal 7: Negative list — if this exact reading was previously corrected, flag it
+  const prevCorrection = corrections.find(c => {
+    const cClean = (c.w||'').replace(/[\s\-–]/g,'').toUpperCase();
+    return cClean === clean;
+  });
+  if (prevCorrection) {
+    signals.push({ type:'negativ', label:`Rettet før → ${prevCorrection.r}`, ok:false, boost:-10 });
+    bonusScore -= 10;
+  }
+
   // Composite score: OCR confidence + validation bonus, capped at 100
   const finalScore = Math.min(100, Math.max(0, ocrConfidence + bonusScore));
   const validated = signals.some(s => s.ok);
@@ -691,19 +733,72 @@ function validateNumber(num, ocrConfidence) {
   return { score:finalScore, signals, validated, formatted };
 }
 
-// Auto-learn: save a confirmed number to the known set
+// Auto-learn: save a confirmed number to the known set + learn patterns + track seen count
 function learnNumber(num) {
   if (!num) return;
   const clean = num.replace(/[\s\-–]/g,'').toUpperCase();
-  if (clean.length >= 7 && !knownNumbers.has(clean)) {
+
+  // 1) Add to known numbers
+  if (clean.length >= 4 && !knownNumbers.has(clean)) {
     knownNumbers.add(clean);
-    // Keep only last 2000 to avoid bloat
     if (knownNumbers.size > 2000) {
       const arr = [...knownNumbers];
       knownNumbers = new Set(arr.slice(arr.length - 2000));
     }
     LS.setJ('knownNumbers', [...knownNumbers]);
   }
+
+  // 2) Auto-extract BIC code if ISO-like
+  const owner = extractOwnerCode(clean);
+  if (owner && !bicWhitelist.has(owner)) {
+    bicWhitelist.add(owner);
+    LS.setJ('bicWhitelist', [...bicWhitelist]);
+  }
+
+  // 3) Pattern learning — extract prefix pattern for non-ISO numbers
+  learnPattern(clean);
+
+  // 4) Seen count — increment for confidence escalation
+  seenCount[clean] = (seenCount[clean] || 0) + 1;
+  // Keep seen count manageable
+  const scKeys = Object.keys(seenCount);
+  if (scKeys.length > 3000) {
+    const sorted = scKeys.sort((a,b) => seenCount[b] - seenCount[a]);
+    const keep = sorted.slice(0, 2000);
+    const newSC = {};
+    keep.forEach(k => newSC[k] = seenCount[k]);
+    seenCount = newSC;
+  }
+  LS.setJ('seenCount', seenCount);
+}
+
+// Learn prefix patterns from non-ISO numbers (e.g. "RRM026" → pattern "RRM")
+function learnPattern(clean) {
+  // Skip ISO-format numbers (they use BIC codes instead)
+  if (/^[A-Z]{3}[UJZ]\d{6,7}$/.test(clean)) return;
+
+  // Extract prefix: consecutive letters at the start
+  const pm = clean.match(/^([A-Z]{2,5})\d{2,}/);
+  if (!pm) return;
+  const prefix = pm[1];
+
+  if (!learnedPatterns[prefix]) {
+    learnedPatterns[prefix] = { count: 0, examples: [] };
+  }
+  learnedPatterns[prefix].count++;
+  if (learnedPatterns[prefix].examples.length < 5 && !learnedPatterns[prefix].examples.includes(clean)) {
+    learnedPatterns[prefix].examples.push(clean);
+  }
+
+  // Keep patterns manageable
+  const pKeys = Object.keys(learnedPatterns);
+  if (pKeys.length > 200) {
+    const sorted = pKeys.sort((a,b) => learnedPatterns[b].count - learnedPatterns[a].count);
+    const newLP = {};
+    sorted.slice(0, 150).forEach(k => newLP[k] = learnedPatterns[k]);
+    learnedPatterns = newLP;
+  }
+  LS.setJ('learnedPatterns', learnedPatterns);
 }
 
 // Fetch existing numbers from SharePoint to seed known numbers
@@ -729,11 +824,26 @@ async function loadKnownFromSP() {
     LS.setJ('knownNumbers', [...knownNumbers]);
     log(`${allNums.length} kendte numre indlæst → whitelist har ${knownNumbers.size} numre`, 'ok');
 
-    // Also learn owner codes from existing data
+    // Auto-learn owner codes (BIC) from existing data
     const ownerCodes = new Set();
     allNums.forEach(n => { const o = extractOwnerCode(n); if (o) ownerCodes.add(o); });
     ownerCodes.forEach(c => bicWhitelist.add(c));
+    LS.setJ('bicWhitelist', [...bicWhitelist]);
     log(`${ownerCodes.size} ejerkoder lært fra eksisterende data`, 'ok');
+
+    // Auto-learn patterns from existing non-ISO numbers
+    let patternCount = 0;
+    allNums.forEach(n => {
+      learnPattern(n);
+      // Populate seen count from existing data
+      seenCount[n] = (seenCount[n] || 0) + 1;
+    });
+    LS.setJ('seenCount', seenCount);
+    const activePats = Object.keys(learnedPatterns).filter(k => learnedPatterns[k].count >= 2);
+    if (activePats.length > 0) {
+      log(`${activePats.length} mønstre lært: ${activePats.slice(0,10).join(', ')}${activePats.length>10?'…':''}`, 'ok');
+    }
+    log(`Set-tæller initialiseret for ${Object.keys(seenCount).length} numre`, 'ok');
   } catch(e) {
     log('Kunne ikke hente kendte numre: ' + e.message, 'warn');
   }
@@ -1094,6 +1204,11 @@ async function runFullOCR(imgData) {
   const ownerHint = bicWhitelist.size > 0 ?
     `\nKnown owner codes in this fleet: ${[...bicWhitelist].slice(0,30).join(', ')}${bicWhitelist.size>30?'…':''}` : '';
 
+  // Build learned pattern hints for the prompt
+  const activePats = Object.entries(learnedPatterns).filter(([k,v]) => v.count >= 2).sort((a,b) => b[1].count - a[1].count);
+  const patternHint = activePats.length > 0 ?
+    `\nKnown non-standard ID patterns in this fleet: ${activePats.slice(0,10).map(([k,v]) => `${k}+digits (e.g. ${v.examples[0]})`).join(', ')}` : '';
+
   const prompt = `You are a precise OCR assistant. Read the container identification number from this photograph.
 IMPORTANT: Read EXACTLY what you see. Do NOT modify or "correct" characters to fit any format.
 The number may follow ISO 6346 format (4 letters + 6 digits + check digit, e.g. "MSCU 123456-7") but it may also be a non-standard ID (e.g. "NJC 12345", "ABC 9876").
@@ -1102,7 +1217,7 @@ RULES:
 - Report exactly what you see — do not invent or change characters
 - Common OCR confusions: O/0, I/1, S/5, B/8 — note these in reasoning
 - If you can see the number clearly, confidence should be 85-100%
-- If some characters are ambiguous, note which ones and give alternatives${ownerHint}
+- If some characters are ambiguous, note which ones and give alternatives${ownerHint}${patternHint}
 Return ONLY JSON: {"primary":"XXXX 999999-9","confidence":92,"alternatives":[{"number":"...","confidence":60}],"reasoning":"brief description of what you see and any ambiguous characters"}
 Include up to 3 alternatives if any characters are ambiguous.${corrCtx}`;
 
@@ -1209,9 +1324,15 @@ Include up to 3 alternatives if any characters are ambiguous.${corrCtx}`;
   // Format: only apply ISO formatting if it's actually ISO — otherwise just clean up
   finalNum = formatIfISO(finalNum);
 
-  // Correction memory
-  const known = corrections.find(c => c.w === finalNum);
-  if (known) { log(`Hukommelse: "${finalNum}" → "${known.r}"`, 'info'); finalNum = known.r; }
+  // Correction memory — check both exact and fuzzy matches against previous corrections
+  const normFinal = finalNum.replace(/[\s\-–]/g,'').toUpperCase();
+  const exactCorr = corrections.find(c => (c.w||'').replace(/[\s\-–]/g,'').toUpperCase() === normFinal);
+  if (exactCorr) {
+    log(`Hukommelse: "${finalNum}" → "${exactCorr.r}" (rettet før${exactCorr.n>1?' ×'+exactCorr.n:''})`, 'info');
+    finalNum = exactCorr.r;
+    // Boost confidence since we've seen this correction before
+    finalConf = Math.min(100, finalConf + 10);
+  }
 
   // Final validation for return
   const finalV = validateNumber(finalNum, finalConf);
@@ -1330,12 +1451,29 @@ async function processItem(item) {
       LS.setJ('processedIds', [...processedIds]);
       updateFeedItem(feedId, number, confidence, 'flagged', validated);
       addSessionRecord(itemId, hvem, number, confidence, validated, 'skipped');
+      // Track in skip history for negative list
+      skipHistory.push({ number, itemId, ts: Date.now() });
+      if (skipHistory.length > 500) skipHistory = skipHistory.slice(-500);
+      LS.setJ('skipHistory', skipHistory);
       log(`Sprunget over: "${number}" — post ${itemId}`, 'warn');
     } else {
       const finalValue = decision.value || number;
       const wasEdited = finalValue !== number;
       if (wasEdited) {
-        corrections.push({ w: number, r: finalValue, ts: Date.now() });
+        // Aggregate corrections: if this wrong→right pair exists, increment count
+        const normW = number.replace(/[\s\-–]/g,'').toUpperCase();
+        const normR = finalValue.replace(/[\s\-–]/g,'').toUpperCase();
+        const existing = corrections.find(c =>
+          (c.w||'').replace(/[\s\-–]/g,'').toUpperCase() === normW &&
+          (c.r||'').replace(/[\s\-–]/g,'').toUpperCase() === normR
+        );
+        if (existing) {
+          existing.n = (existing.n || 1) + 1;
+          existing.ts = Date.now();
+        } else {
+          corrections.push({ w: number, r: finalValue, n: 1, ts: Date.now() });
+        }
+        if (corrections.length > 500) corrections = corrections.slice(-500);
         LS.setJ('corrections', corrections);
       }
       await saveToSP(itemId, finalValue);
@@ -1633,9 +1771,20 @@ function renderSessionStats() {
   const avgConf = sessionRecords.filter(r=>r.confidence>0).reduce((a,r)=>a+r.confidence,0) / (sessionRecords.filter(r=>r.confidence>0).length||1);
   const isoOkCount = sessionRecords.filter(r=>r.isoOk).length;
 
+  // Whitelist stats
+  const wlBic = bicWhitelist.size;
+  const wlKnown = knownNumbers.size;
+  const wlPats = Object.keys(learnedPatterns).filter(k => learnedPatterns[k].count >= 2).length;
+  const wlCorr = corrections.length;
+  const wlRepeat = Object.values(seenCount).filter(v => v >= 2).length;
+
   document.getElementById('sessionStats').innerHTML = `
     Behandlet: <b>${total}</b> · Gemt: <b style="color:var(--success)">${saved}</b> · Sprunget: <b style="color:var(--warn)">${skipped}</b> · Fejl: <b style="color:var(--danger)">${errors}</b><br>
-    Gns. konfidens: <b>${avgConf.toFixed(0)}%</b> · Valideret: <b>${isoOkCount}</b>/${saved}
+    Gns. konfidens: <b>${avgConf.toFixed(0)}%</b> · Valideret: <b>${isoOkCount}</b>/${saved}<br>
+    <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px">
+      <b style="font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)">Whitelist-status</b><br>
+      BIC-koder: <b>${wlBic}</b> · Kendte numre: <b>${wlKnown}</b> · Mønstre: <b>${wlPats}</b> · Rettelser: <b>${wlCorr}</b> · Gengangere (2+): <b>${wlRepeat}</b>
+    </div>
   `;
 
   // Employee stats from session
@@ -1786,7 +1935,7 @@ function exportCSV() {
 // ═══════════════════════════════════════════════════════════
 updateCost();
 updateStats();
-log('Unit ID Scanner v5.0 MSAL Mode klar — forbedret OCR', 'ok');
+log('Unit ID Scanner v5.1 MSAL Mode klar — forbedret OCR', 'ok');
 log('Klik "Microsoft Login" for at logge ind', 'info');
 
 // Handle MSAL redirect response (runs after Microsoft login redirects back)
