@@ -1,0 +1,19 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "DefaultEndpointsProtocol=https;AccountName=<storage_account_name>;AccountKey=<storage_account_key>;EndpointSuffix=core.windows.net",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "FUNCTIONS_WORKER_RUNTIME_VERSION": "3.11",
+    "SQL_SERVER": "njco-sql-server",
+    "SQL_DATABASE": "njco-operations",
+    "STORAGE_ACCOUNT_NAME": "njcostorage",
+    "STORAGE_CONTAINER_NAME": "images"
+  },
+  "ConnectionStrings": {},
+  "Host": {
+    "CORS": {
+      "AllowedOrigins": ["*"]
+    },
+    "LocalHttpPort": 7071
+  }
+}
